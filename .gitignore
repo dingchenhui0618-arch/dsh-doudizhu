@@ -16,7 +16,9 @@ node_modules/
 Thumbs.db
 
 # Scratch: live-check output, harness downloads (React UMD), snapshots,
-# screenshots from the real-browser pass.
+# screenshots from the real-browser pass, and the local `pnpm pack` tarball
+# (the GitHub release asset is the distribution channel, not a committed file).
 _tmp/
 _tmp_*/
 .*.tmp
+*.tgz

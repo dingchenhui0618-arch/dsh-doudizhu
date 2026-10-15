@@ -54,17 +54,37 @@ DeepSeek Harness 的插件：**三人局域网斗地主**。三个人各自在�
 
 ### 还没验证的（别当成已经好了）
 
-- **浮窗在 DSH 自己的 GUI 里还没出现过。** 原因是 `package.json` 的 `dsh.client` 元数据在 DSH
-  启动时读一次，而这个插件**先以 host-only 形态装进去**，运行中的实例还在用那份旧元数据。
-  我做过 A/B：把插件 disable→enable 一次（`application: applied`）逼它重读，仍然不行；
-  重启 DSH 后才会扫描到客户端半区。**我没有重启**——重启桌面版会杀掉当前会话本身，
-  这该由你来决定。也因此我没法读它的启动图：Web shell 需要 `dsh web` 打印的会话 URL，
-  未带会话时 `/api/boot` 返回 401，Electron 窗口里的那个 URL 用 Chrome 够不到。
-- **DSH 槽位外壳本身**（浮窗层的位置、层级、点击穿透规则）没有被真实验证过，
-  验的是它下面的东西——见下一条。
+- **浮窗的样子我没有亲眼看过。** 我能证明它**已经注册进运行中的 GUI**：客户端槽位树里
+  `shell.overlay` 有 `{registrant: "dsh-doudizhu", id: "doudizhu-mini", order: 30, active: true}`，
+  排在 `holdem-mini`(20) 与 `den-mini`(40) 之间；`conversation.view` 有
+  `{id: "doudizhu", order: 30, active: true}`。但**「注册了」不等于「长在屏幕上的样子对」**——
+  位置、层级、点击穿透、深浅色对比这些我都没看到。
 - **三机实机、防火墙、以及"另外两家真的在别的电脑上"**：一步都没跑，M6 的事。
   目前 follower 路径是用 Node 客户端经本机局域网地址验证的，那是真实传输但不是真实浏览器。
 - 深浅色主题下的对比度只在深色下看过。
+
+### 让它出现在 GUI 里（实测：不用重启）
+
+**这一节我上一轮写错过，在这里纠正。** 我原先说"`dsh.client` 元数据在启动时读一次，
+所以必须重启 DSH 才会扫描到客户端半区"，依据是探测 `/plugins/<id>/client.js` 返回 404。
+那个探测**不可诊断**：已经正常工作的 `dsh-holdem` 同样 404（桌面版走的是 shell 自己的
+carrier，不是那条 HTTP 路由）。**结论是错的。**
+
+真实情况：**把插件关掉再打开一次就够了**，运行中的页面会通过 HMR 拿到新的 Loader entry，
+并按 `dsh.client` 组合出客户端半区（官方文档 `dsh-client-modules` 的原话：
+*"Enabling an ordinary plugin adds its Loader entry … Re-enabling loads one instance with its styles"*）。
+本机桌面版实测：
+
+```
+plugin_manager set_plugin  include:dsh-doudizhu  enabled=false   -> application: applied
+plugin_manager set_plugin  include:dsh-doudizhu  enabled=true    -> application: applied
+```
+
+之后**没有重启**，客户端槽位树里立刻出现上面那两个 `active` 的占用者。
+
+所以判断"客户端半区到底装上没有"，要看**客户端槽位树**（`cordis_inspect_query`
+→ `client/Slots.listSubTree`，root 填 `shell.overlay` 或 `conversation.view`），
+不要看 HTTP 探测。
 
 ### 真实浏览器里验过什么
 
@@ -184,18 +204,49 @@ DSH 自己的 Web 认证**不覆盖插件用 `ctx.webServer.register` 挂的 pre
 上下文里加载真实 bundle，配一个最小 React 与最小 DOM，**驱动真实房间产生的快照**，
 断言槽位注册、渲染结果与按钮交互（选牌后「出牌」由灰变亮、再点又变灰）。
 
-## 装进自己的 DSH
+## 装进自己的 DSH（另外两家要做的）
+
+**不用克隆、不用构建、不用在这台机器上装 Node。** 装的是一份预构建的包，`lib/` 已经在仓库里
+（所以这个仓库的 `.gitignore` 故意**不**忽略 `lib/`）。把这一行地址交给 DSH 的插件管理器：
+
+```
+https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.1.1/dsh-doudizhu-0.1.1.tgz
+```
+
+三条路都通向同一个动作，挑顺手的：
+
+- **插件市场**（本机装的是 `dshmarket`，界面里"点一下装好"）：搜 `doudizhu` 或直接粘地址；
+- **设置 → 插件**：粘贴上面那行地址安装；
+- **让智能体装**：`plugin_manager` 工具 `install_bundle`，target 填那行地址。
+
+装完**关掉插件再打开一次**（不是重启 DSH），浮窗和「斗地主」标签页就出现了，
+原因见上面「让它出现在 GUI 里」。
+
+### 这条路径我验到什么程度
+
+- **验过**：在一个干净目录里从上面这个 URL 装，5.7 秒装好；装出来的包能真的被加载出来，
+  `name = "dsh-doudizhu"`、`inject = ["webServer"]`、`apply` 是函数，
+  `exports["./client"]`、`dsh.bundle.patch`、`dsh.client` 元数据齐全。
+- **验过（先例）**：你这台机器的 profile 里 `dsh-all-in` 就是用同样形态的
+  GitHub Release tarball URL 装的（`profiles/desktop/package.json` 里能看见），
+  所以插件管理器接受这种 spec。
+- **没验过**：桌面版安装对话框的**具体文案**——那是个 Electron 窗口，我够不到，
+  没法替你点。如果你那台机器上按钮名字不一样，照意思找"从地址/URL 安装"即可。
+
+### 从源码装（改代码时用）
+
+`link:` 安装，改完 `lib/` 立即生效，`~/.dsh/profiles/<profile>/package.json` 里的依赖写成
+本地目录的 `link:` 路径（本机就是这么装的）：
+
+```json
+"dsh-doudizhu": "link:<你克隆到的目录>"
+```
+
+再把 `dsh-doudizhu` 加进同一份 `package.json` 的 `dsh.profile.bundles` 数组：
 
 ```sh
-# 浏览器版 profile
-dsh plugin --profile web add dsh-doudizhu
-# 桌面版（Electron 独占管理 desktop profile，用界面里的插件管理器，或插件管理工具）
-```
-
-本机开发时直接装本地目录（`link:` 安装，改完 `lib/` 立即生效）：
-
-```
-dsh plugin --profile web add <你克隆这个仓库的目录>
+git clone https://github.com/dingchenhui0618-arch/dsh-doudizhu
+node scripts/build.mjs        # 只有改了 src/ 才需要
 ```
 
 ## 开发
@@ -222,10 +273,9 @@ node scripts/browser-harness.mjs --port 8792   # 然后打开 http://127.0.0.1:8
 
 **热更新边界**：客户端半区（`src/client.cjs`）改完 build，桌面版若在跑 client-hmr
 会推给浏览器；host 半区（`src/host.js`）改动要重启 DSH 才加载。
-还有一条更容易踩：**`package.json` 里的 `dsh.client` 元数据在 DSH 启动时读一次并缓存**，
-所以给一个原本没有客户端半区的插件**新加** `exports["./client"]` 或 `dsh.client`
-之后，必须重启 DSH 才会被扫描到——在这之前插件照常工作，只是浮窗不出现。
-（官方文档：包元数据缓存不过期，增删插件需重启。）
+而**给一个原本没有客户端半区的插件新加 `dsh.client` / `exports["./client"]`，
+不需要重启**：关掉插件再打开一次就会重新扫描并组合，实测见上面「让它出现在 GUI 里」。
+（我原先在这里写"必须重启"，是错的。）
 
 `test/` 下除了 `*.test.mjs` 还有共享断言（`test/helpers/leak.mjs`）和子进程探针
 （`test/fixtures/follower-probe.mjs`），所以 test 脚本显式带上 glob——

@@ -5,6 +5,33 @@
 
 ## [Unreleased]
 
+### 订正
+
+- **"新增客户端半区必须重启 DSH"是错的。** 我原先的结论建立在探测
+  `/plugins/<id>/client.js` 返回 404 上，但那个探测**不可诊断**：已经正常工作的
+  `dsh-holdem` 同样 404（桌面版走 shell 自己的 carrier，不是那条 HTTP 路由）。
+  实测**把插件关掉再打开一次**，运行中的页面就通过 HMR 拿到新的 Loader entry 并按
+  `dsh.client` 组合出客户端半区。判断"客户端半区装上没有"要看**客户端槽位树**，不是 HTTP 探测。
+- 现场证据（本机桌面版，**没有重启**）：`shell.overlay` 出现
+  `{registrant: "dsh-doudizhu", id: "doudizhu-mini", order: 30, active: true}`，
+  排在 `holdem-mini`(20) 与 `den-mini`(40) 之间；`conversation.view` 出现
+  `{id: "doudizhu", order: 30, active: true}`。
+
+### 发布
+
+- **已推到 GitHub**：<https://github.com/dingchenhui0618-arch/dsh-doudizhu>（public）。
+  Release 附 `dsh-doudizhu-<version>.tgz`——`pnpm pack` 的产物，只有 8 个文件
+  （`lib/index.js`、`lib/client.js`、`cordis.patch.yml`、`package.json` 与四份文档，
+  不含 `src/`、测试与 `_tmp/`，40,934 字节）。这就是另外两家要装的包，
+  **他们不需要克隆、不需要构建、不需要在本机装 Node**。
+- 实测该地址能装：干净目录里 `pnpm add <release tarball URL>` 5.7 秒装好，
+  装出来的包能真的加载出 `name = "dsh-doudizhu"`、`inject = ["webServer"]`、`apply` 函数，
+  且 `exports["./client"]`、`dsh.bundle.patch`、`dsh.client` 元数据齐全。
+- 推送前三步检查的结论：无 API key / token / 私钥 / `.env`；`.gitignore` 覆盖
+  `node_modules/`、`_tmp/`、`*.tgz`、`.env*`、`*.pem`、`*.key`；临时产物与截图全部留在
+  未提交的 `_tmp/`。**顺带清掉了一处真实的隐私泄漏**：本机局域网地址原本被写进了
+  浮窗的输入占位符、错误示例和测试数据，已换成文档示例地址。
+
 ### 新增
 
 - 规则引擎 `src/rules.js`：54 张牌堆、11 种合法牌型识别、压牌关系、
