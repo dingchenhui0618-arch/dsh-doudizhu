@@ -1,0 +1,4 @@
+# pnpm 11 reads build-script permissions from here, not from package.json.
+# esbuild is a devDependency only; nothing here is shipped to users.
+allowBuilds:
+  esbuild: true

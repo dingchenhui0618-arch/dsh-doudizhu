@@ -1,0 +1,7 @@
+# Keep one line ending for everyone: the sources and the generated bundles are
+# all LF, and a Windows checkout that rewrites them would show up as diff noise.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
