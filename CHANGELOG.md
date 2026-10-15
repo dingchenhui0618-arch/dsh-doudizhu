@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **`scripts/live-check.mjs` 的压牌分支是死代码。** 它读 `move.shape` / `move.length`，
+  而 `classifyMove` 从来没返回过这两个字段（返回的是 `type` / `size` / `mainValue`），
+  于是除了第一次领出，之后每一步都走 `pass`。牌局照样能结束——谁领出谁一路领完——
+  所以这个缺陷一直没暴露：它证明的是传输，不是规则。
+  现在改成用真的 `classifyMove` / `canBeat` / `smallestLead` 选牌，并**加了断言**
+  （`beats > 0`、`passes > 0`）。修完实测一盘：**领出 7 次 / 压上家 36 次 / 不出 16 次**；
+  修之前这个数字是 0 次。
+
 ### 订正
 
 - **"新增客户端半区必须重启 DSH"是错的。** 我原先的结论建立在探测

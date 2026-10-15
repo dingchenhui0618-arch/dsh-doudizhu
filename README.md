@@ -44,9 +44,9 @@ DeepSeek Harness 的插件：**三人局域网斗地主**。三个人各自在�
 | M1 规则引擎 `src/rules.js` | ✅ 完成 | 18 个用例 |
 | M2 牌局状态机 `src/game.js` | ✅ 完成 | 18 个用例，含固定种子整局重放 |
 | M3 权威服务 + 传输 `src/room.js` `src/net.js` | ✅ 完成 | 27 个用例：真 TCP/HTTP、长轮询、**全程防泄牌断言**、跨 OS 进程入座、局域网地址可达 |
-| M4 DSH 插件接线 `src/host.js` | ✅ 完成 | 11 个用例 + `scripts/live-check.mjs` 在**运行中的 DSH 里**开房、经这台机器的局域网地址入座、打完 61 步一盘 |
+| M4 DSH 插件接线 `src/host.js` | ✅ 完成 | 11 个用例 + `scripts/live-check.mjs` 在**运行中的 DSH 里**开房、经这台机器的局域网地址入座、打完一盘（60–70 步，含 36 次真的压牌） |
 | M5 浮窗 UI `src/client.cjs` | ✅ 完成 | 37 个用例：21 个展示逻辑 + 4 个浏览器半区依赖守卫 + 12 个**跑真实 `lib/client.js`** 的渲染/交互用例；真实 Chrome 走过开房→入座→叫分定地主；真 GUI 里两个槽位 `active`、标签页与浮窗药丸已抓图 |
-| M6 三机实机验收 | ⬜ 未开始 | — |
+| M6 三机实机验收 | ⬜ 未开始 | 步骤见下面「三机实机怎么跑」；本机的传输路径已通，缺的是另外两台真机器 |
 | M7 开源推送 | ⬜ 未开始 | — |
 
 当前 `node --test "test/*.test.mjs"`：**112 个用例全部通过**（约 2.9 秒）。
@@ -266,6 +266,34 @@ https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.1.1/ds
 git clone https://github.com/dingchenhui0618-arch/dsh-doudizhu
 node scripts/build.mjs        # 只有改了 src/ 才需要
 ```
+
+## 三机实机怎么跑（M6）
+
+三个人的机器都要先有 DSH。**主机**就是你现在这台；另外两家各做一次：
+
+1. 装 DSH，再按上面「装进自己的 DSH」把插件装上（一行 Release 地址，不用克隆不用构建）；
+2. 关掉插件再打开一次，右下角出现浮窗、标签栏出现「斗地主」；
+3. 主机点「开房」，浮窗里会显示房间码和局域网地址，把 `房间码 XXXX · 地址 <ip>:8791`
+   那一行发给另外两家；
+4. 他们在自己的浮窗里填地址和房间码，点「加入」；
+5. **三人到齐才自动发牌**（不补位、无 AI 补位），叫分定地主，顺时针出牌。
+
+**主机这台要放行入站 TCP 8791**，Windows 默认拦入站。管理员 PowerShell：
+
+```
+netsh advfirewall firewall add rule name="dsh-doudizhu 8791" dir=in action=allow protocol=TCP localport=8791
+```
+
+不再需要时删掉：
+
+```
+netsh advfirewall firewall delete rule name="dsh-doudizhu 8791"
+```
+
+已经通到哪一步：`scripts/live-check.mjs` 在**这台机器上**对**运行中的插件**走完了整条路径——
+真开房、真绑定局域网端口、另外两家作为 Node 客户端经**真实局域网地址**入座、打完一盘
+（含 36 次真的压牌）、再开下一局、关房，全程做防泄牌扫描。**但那不等于**另外两家真的在
+别的电脑上、真的用浏览器打——那才是 M6 剩下的事。
 
 ## 开发
 

@@ -12,7 +12,7 @@
 //
 // Exits non-zero on the first failed assertion, and always tries to /leave.
 
-import { cardFromId } from '../src/rules.js'
+import { cardFromId, canBeat, classifyMove, smallestLead } from '../src/rules.js'
 
 const ROUTE = '/dsh-doudizhu'
 const LOCAL_TOKEN = 'x-dsh-doudizhu-token'
@@ -114,13 +114,51 @@ function leakScan(views, label) {
   }
 }
 
+/**
+ * Pick a legal action. This used to read `move.shape` / `move.length`, which
+ * `classifyMove` has never returned — so the beat branch was dead code and the
+ * driver passed on every turn after the first lead. The hand still finished
+ * (whoever led kept leading), which is exactly why it went unnoticed: it proved
+ * the transport, not the rules. Now every candidate is validated through the
+ * real `classifyMove` / `canBeat`, so the run exercises actual beating.
+ */
 function pickAction(view) {
-  const hand = [...view.you.hand].sort((a, b) => cardFromId(a).value - cardFromId(b).value)
-  if (!view.lastPlay || view.canPass === false) return { type: 'play', cards: [hand[0]] }
-  const move = view.lastPlay.move
-  if (move && move.shape === 'single' && move.length === 1) {
-    const beat = hand.find((id) => cardFromId(id).value > move.mainValue)
-    if (beat) return { type: 'play', cards: [beat] }
+  const hand = [...view.you.hand]
+  if (!view.lastPlay) return { type: 'play', cards: smallestLead(hand) }
+
+  const target = view.lastPlay.move
+  const byValue = new Map()
+  for (const id of hand) {
+    const value = cardFromId(id).value
+    if (!byValue.has(value)) byValue.set(value, [])
+    byValue.get(value).push(id)
+  }
+  const ascending = [...byValue.keys()].sort((a, b) => a - b)
+
+  // Same shape first, cheapest value upward: single / pair / triple.
+  const sameShape = { single: 1, pair: 2, triple: 3 }[target.type]
+  if (sameShape) {
+    for (const value of ascending) {
+      const group = byValue.get(value)
+      if (group.length < sameShape) continue
+      const cards = group.slice(0, sameShape)
+      const candidate = classifyMove(cards)
+      if (candidate && canBeat(candidate, target)) return { type: 'play', cards }
+    }
+  }
+
+  // Then a bomb, then the rocket. Values 16/17 are the two jokers.
+  for (const value of ascending) {
+    const group = byValue.get(value)
+    if (group.length !== 4) continue
+    const cards = group.slice(0, 4)
+    const candidate = classifyMove(cards)
+    if (candidate && canBeat(candidate, target)) return { type: 'play', cards }
+  }
+  const rocket = hand.filter((id) => cardFromId(id).value >= 16)
+  if (rocket.length === 2) {
+    const candidate = classifyMove(rocket)
+    if (candidate && canBeat(candidate, target)) return { type: 'play', cards: rocket }
   }
   return { type: 'pass' }
 }
@@ -186,6 +224,9 @@ try {
 
   console.log('\n[5] 打完一盘')
   let steps = 0
+  let leads = 0
+  let beats = 0
+  let passes = 0
   while (current[0].phase !== 'finished' && steps < 400) {
     steps += 1
     const reference = current[0]
@@ -194,6 +235,11 @@ try {
       reference.phase === 'bidding'
         ? { type: 'bid', score: (reference.bids?.length ?? 0) === 0 ? 1 : 0 }
         : pickAction(current[seat])
+    if (reference.phase !== 'bidding') {
+      if (action.type === 'pass') passes += 1
+      else if (reference.lastPlay) beats += 1
+      else leads += 1
+    }
     const result =
       seat === 0
         ? await local('act', { method: 'POST', token, body: { action } })
@@ -206,6 +252,12 @@ try {
     leakScan(current, `第 ${steps} 步`)
   }
   check(current[0].phase === 'finished', `一盘打完（${steps} 步）`)
+  console.log(`     领出 ${leads} 次 / 压上家 ${beats} 次 / 不出 ${passes} 次`)
+  // The whole point of driving a hand is to exercise the beat path. Before this
+  // assertion existed, a dead `move.shape` check made every turn a pass and the
+  // hand still finished — the run proved the transport and nothing about beats.
+  check(beats > 0, `真的压过牌（${beats} 次），不是一路不出`)
+  check(passes > 0, `也有真的不出（${passes} 次）`)
   check(current.every((view) => view.secretsRevealed === true), '结束后才全明牌')
 
   const whole = new Set()
