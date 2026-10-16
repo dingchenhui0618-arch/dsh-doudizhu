@@ -238,11 +238,62 @@ export function playEntries(snapshot) {
  * the *other* accepted shape.
  */
 export const ROUTE_BODIES = {
-  host: ['port', 'name'],
+  host: ['port', 'name', 'botLevel'],
   join: ['url', 'code', 'name'],
   probe: ['url'],
   act: ['action'],
   leave: [],
+}
+
+/**
+ * The four computer strengths, weakest first. This list is the one source of
+ * truth: the authority validates a seat's level against it and the floating
+ * window renders its label, so a level cannot exist in the UI that the room
+ * would refuse (or the other way round).
+ */
+export const BOT_LEVELS = ['easy', 'medium', 'hard', 'hell']
+export const BOT_LABELS = { easy: '简单', medium: '中等', hard: '困难', hell: '地狱' }
+export const DEFAULT_BOT_LEVEL = 'medium'
+
+/**
+ * What each level actually does, in one sentence, for the chip's tooltip.
+ *
+ * These sentences are measured claims, not flavour text: the numbers next to
+ * them are what `scripts/bot-league.mjs` produces, and the rules named here are
+ * the branches in bot.js. Two rules that sounded clever were deleted because the
+ * measurement said they made 地狱 weaker, and the text above would have had to
+ * claim them.
+ */
+export const BOT_BLURBS = {
+  easy: '随便打：经常乱出一手，也看不出自己能一把走完。（实测三档里最弱）',
+  medium: '会压最小的牌、留炸弹、能走完就走完，农民不压快走完的队友；但不算牌也不规划，先手只出最小的一张。',
+  hard: '先手按"还剩几手"选牌，叫分更凶，其余同中等。',
+  hell: '会记账：谁快走完时先算"我这一手压不压得住"，压不住就上炸弹，还能算出一路压着走完的必杀路线。',
+}
+
+export function isBotLevel(value) {
+  return BOT_LEVELS.includes(String(value ?? ''))
+}
+
+/** What a computer seat is called on screen, e.g. 电脑·困难. */
+export function botSeatLabel(level) {
+  return isBotLevel(level) ? `电脑·${BOT_LABELS[level]}` : '电脑'
+}
+
+/**
+ * How many computers it would take to fill every seat that is not a person's.
+ *
+ * This is the number the "用电脑补齐" button sends as its target count, so it
+ * counts the computers already seated too: with one person in the room the answer
+ * is 2 whether or not one computer is already sitting there. Counting free seats
+ * instead would make the button ask for one computer too few — and, because a
+ * third seat fills the room, that is the difference between playing and waiting.
+ */
+export function botCapacity(snapshot) {
+  const seats = Array.isArray(snapshot?.seats) ? snapshot.seats : []
+  if (!seats.length) return 0
+  const humans = seats.filter((entry) => entry && entry.occupied && !entry.bot).length
+  return Math.max(0, seats.length - humans)
 }
 
 /**
@@ -290,6 +341,7 @@ export function prefsFrom(raw) {
     // Only the table pane is shipped so far; anything else falls back to it.
     pane: value.pane === 'log' ? 'log' : 'table',
     name: [...name].slice(0, 12).join(''),
+    botLevel: isBotLevel(value.botLevel) ? String(value.botLevel) : DEFAULT_BOT_LEVEL,
   }
 }
 

@@ -21,6 +21,7 @@ import { timingSafeEqual } from 'node:crypto'
 
 import { createAuthorityServer, createFollowerLink } from './net.js'
 import { act as applyAction, createRoom, joinSeat, snapshotFor } from './room.js'
+import { isBotLevel } from './ui-logic.js'
 
 export const name = 'dsh-doudizhu'
 export const inject = ['webServer']
@@ -252,6 +253,9 @@ export function apply(ctx, config) {
     // Everything that can fail happens before the running table is touched, so a
     // refused attempt never costs the player the game they were already in.
     const room = createRoom({ name: '斗地主房间' })
+    // The strength chosen before the room existed; the seat controls can change it
+    // again at any time, so a stale or hostile value is simply ignored.
+    if (isBotLevel(input.botLevel)) room.botLevel = String(input.botLevel)
     let authority
     try {
       authority = await createAuthorityServer(room, { host: settings.host, port })

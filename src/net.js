@@ -17,9 +17,12 @@ import http from 'node:http'
 import net from 'node:net'
 import { networkInterfaces } from 'node:os'
 
+import { BOT_DELAY_MS } from './bot.js'
 import {
   PROTOCOL,
-  act as applyAction,
+  act,
+  applyBotAction,
+  botTurnSeat,
   closeRoom,
   joinSeat,
   roomInfo,
@@ -146,13 +149,40 @@ function portIsBusy(port, host) {
  * Start the authority. `port: 0` lets the OS choose (tests use that). Binding
  * `0.0.0.0` is what makes the address reachable from the other two machines.
  */
-export async function createAuthorityServer(room, { host = '0.0.0.0', port = 8791, pollTimeoutMs = 20000 } = {}) {
+export async function createAuthorityServer(
+  room,
+  { host = '0.0.0.0', port = 8791, pollTimeoutMs = 20000, botDelayMs = BOT_DELAY_MS } = {},
+) {
   if (port && (await portIsBusy(port, host))) throw new Error(`端口 ${port} 已被占用`)
 
+  // Computers move on a timer instead of on a request, because nobody is going to
+  // click for them. One pending timer at a time, re-armed after each move, so a
+  // table of three computers plays itself from the deal to the last card.
+  let botTimer = null
+  let closed = false
+  const botRand = () => room.rng(0x100000000) / 0x100000000
+  function scheduleBot(delay = botDelayMs) {
+    if (closed || botTimer) return
+    if (botTurnSeat(room) === null) return
+    botTimer = setTimeout(() => {
+      botTimer = null
+      if (closed) return
+      const seat = botTurnSeat(room)
+      if (seat !== null) applyBotAction(room, seat, { rand: botRand })
+      scheduleBot()
+    }, Math.max(0, delay))
+    // A game nobody is watching must not hold the process open.
+    botTimer.unref?.()
+  }
+
   const server = http.createServer((req, res) => {
-    handle(req, res, room, pollTimeoutMs).catch((error) => {
-      send(res, 500, { ok: false, error: `服务端错误：${error?.message ?? error}` })
-    })
+    handle(req, res, room, pollTimeoutMs)
+      .catch((error) => {
+        send(res, 500, { ok: false, error: `服务端错误：${error?.message ?? error}` })
+      })
+      // A join can fill the last seat and deal, and an action can hand the turn to
+      // a computer. Checking in one place after every request covers all of them.
+      .finally(() => scheduleBot())
   })
 
   const ready = new Promise((resolve, reject) => {
@@ -166,6 +196,7 @@ export async function createAuthorityServer(room, { host = '0.0.0.0', port = 879
       // If every adapter is virtual there is nothing honest to prefer, so fall
       // back to offering them rather than handing out an unreachable loopback.
       const shareable = real.length ? real : candidates
+      scheduleBot()
       resolve({
         server,
         room,
@@ -181,7 +212,13 @@ export async function createAuthorityServer(room, { host = '0.0.0.0', port = 879
           virtual: entry.virtual,
         })),
         address: bound,
-        close: () => closeAuthority(server, room),
+        botDelayMs,
+        close: () => {
+          closed = true
+          if (botTimer) clearTimeout(botTimer)
+          botTimer = null
+          return closeAuthority(server, room)
+        },
       })
     })
   })
@@ -264,7 +301,7 @@ async function handle(req, res, room, pollTimeoutMs) {
       send(res, 200, { ok: true, state: snapshotFor(room, seat) })
       return
     }
-    const result = applyAction(room, token, body)
+    const result = act(room, token, body)
     if (!result.ok) {
       // A refused move is a valid request with an invalid action: 200 + ok:false
       // so the client can show the reason without treating it as a transport error.

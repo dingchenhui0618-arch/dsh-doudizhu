@@ -372,3 +372,375 @@ export function rolesFor(landlord, seats = SEAT_COUNT) {
 export function winnerSide(finishedSeat, landlord) {
   return finishedSeat === landlord ? 'landlord' : 'farmers'
 }
+
+/* ------------------------------------------------------------ move search -- */
+
+/**
+ * Bounded memo for the two hot functions. A policy asks "how many turns does this
+ * hand still need" once per candidate move, and the same sub-hands come back over
+ * and over inside one game, so without this the search is quadratic in a way that
+ * makes a league run take minutes instead of seconds.
+ *
+ * The cache is cleared wholesale when it grows past its limit: these functions
+ * are pure, so throwing entries away is always safe, and an LRU would buy very
+ * little for the extra bookkeeping.
+ */
+const GENERATION_CACHE = new Map()
+const PLAN_CACHE = new Map()
+const CACHE_LIMIT = 6000
+
+function cacheKey(handIds, tag) {
+  return `${tag}|${handIds.length}|${[...handIds].sort().join(',')}`
+}
+
+function memoized(cache, key, compute) {
+  const hit = cache.get(key)
+  if (hit !== undefined) return hit
+  const value = compute()
+  if (cache.size >= CACHE_LIMIT) cache.clear()
+  cache.set(key, value)
+  return value
+}
+
+/**
+ * Every shape a hand can play, generated rather than guessed.
+ *
+ * The bot needs this and nothing else: given a hand, which legal moves exist?
+ * One representative is kept per `(type, size, mainValue)` — the *lowest* cards of
+ * that shape — because the alternative (every suit-level combination) multiplies
+ * the search space without changing what any move can beat.
+ *
+ * Two properties this function must keep, both tested:
+ * - **Nothing invented.** Every candidate is handed to `classifyMove` before it
+ *   is emitted, so the generator can never produce a shape the engine rejects.
+ *   The generator and the classifier disagreeing is the bug that would matter
+ *   most, and this is what prevents it.
+ * - **Bounded.** `limit` caps the output; `types` restricts generation to the
+ *   shapes a caller cares about, which is what keeps a following move cheap.
+ *
+ * The result is memoized and therefore **shared**: callers must not sort or
+ * otherwise mutate the returned array in place. Every caller in this repo copies
+ * first (`[...moves].sort(...)`).
+ */
+export function enumerateMoves(handIds = [], { limit = 400, types = null } = {}) {
+  const tag = `${limit}|${types ? [...types].sort().join('|') : '*'}`
+  return memoized(GENERATION_CACHE, cacheKey(handIds, tag), () => generateMoves(handIds, limit, types))
+}
+
+function generateMoves(handIds, limit, types) {
+  const wanted = types ? new Set(types) : null
+  const wants = (type) => !wanted || wanted.has(type)
+  const groups = groupByValue(handIds)
+  const values = [...groups.keys()].sort((left, right) => left - right)
+  const out = []
+
+  // Every candidate goes through the real classifier: a generated move that the
+  // engine would refuse must never reach a caller.
+  const add = (ids) => {
+    if (!ids || !ids.length || out.length >= limit) return
+    const shape = classifyMove(ids)
+    if (!shape || !wants(shape.type)) return
+    out.push({ cardIds: ids, move: shape })
+  }
+  // Wings are optional: when a hand cannot supply them the base shape stands on
+  // its own, and spreading `null` here would throw instead.
+  const addWithWings = (ids, wings) => {
+    if (wings) add([...ids, ...wings])
+  }
+
+  if (wants('single') || wants('pair') || wants('triple') || wants('bomb')) {
+    for (const value of values) {
+      const held = groups.get(value)
+      if (wants('single')) add(pick(groups, value, 1))
+      if (held.length >= 2 && wants('pair')) add(pick(groups, value, 2))
+      if (held.length >= 3 && wants('triple')) add(pick(groups, value, 3))
+      // A rank with four cards can never supply a plane core (see planeMove), so
+      // a bomb and a triple from the same rank are not interchangeable.
+      if (held.length === 4 && wants('bomb')) add(pick(groups, value, 4))
+    }
+  }
+
+  if (wants('rocket') && groups.has(JOKER_VALUES.LJ) && groups.has(JOKER_VALUES.BJ)) {
+    add([SMALL_JOKER, BIG_JOKER])
+  }
+
+  if (wants('triple_single') || wants('triple_pair')) {
+    for (const value of values) {
+      if (groups.get(value).length !== 3) continue
+      const core = pick(groups, value, 3)
+      if (wants('triple_single')) addWithWings(core, weakestWings(groups, [value], 1, 1, values))
+      if (wants('triple_pair')) addWithWings(core, weakestWings(groups, [value], 1, 2, values))
+    }
+  }
+
+  if (wants('straight')) {
+    for (const run of runsOf(values, MIN_STRAIGHT)) {
+      for (let length = MIN_STRAIGHT; length <= run.length; length += 1) {
+        for (let start = 0; start + length <= run.length; start += 1) {
+          add(run.slice(start, start + length).map((value) => pick(groups, value, 1)[0]))
+        }
+      }
+    }
+  }
+
+  if (wants('pair_straight')) {
+    const pairValues = values.filter((value) => groups.get(value).length >= 2)
+    for (const run of runsOf(pairValues, MIN_PAIR_STRAIGHT)) {
+      for (let length = MIN_PAIR_STRAIGHT; length <= run.length; length += 1) {
+        for (let start = 0; start + length <= run.length; start += 1) {
+          add(run.slice(start, start + length).flatMap((value) => pick(groups, value, 2)))
+        }
+      }
+    }
+  }
+
+  if (wants('plane') || wants('plane_single') || wants('plane_pair')) {
+    // Exactly three cards per core rank: planeMove refuses to split a bomb.
+    const coreValues = values.filter((value) => groups.get(value).length === 3)
+    for (const run of runsOf(coreValues, MIN_PLANE)) {
+      for (let length = MIN_PLANE; length <= run.length; length += 1) {
+        for (let start = 0; start + length <= run.length; start += 1) {
+          const slice = run.slice(start, start + length)
+          const core = slice.flatMap((value) => pick(groups, value, 3))
+          if (wants('plane')) add(core)
+          if (wants('plane_single')) addWithWings(core, weakestWings(groups, slice, length, 1, values))
+          if (wants('plane_pair')) addWithWings(core, weakestWings(groups, slice, length, 2, values))
+        }
+      }
+    }
+  }
+
+  if (wants('four_two') || wants('four_two_pairs')) {
+    for (const value of values) {
+      if (groups.get(value).length !== 4) continue
+      const core = pick(groups, value, 4)
+      if (wants('four_two')) addWithWings(core, weakestWings(groups, [value], 2, 1, values))
+      if (wants('four_two_pairs')) addWithWings(core, weakestWings(groups, [value], 2, 2, values))
+    }
+  }
+
+  return out
+}
+
+/** The moves in `handIds` that can legally follow `target`. */
+export function enumerateBeats(handIds = [], target, { limit = 400 } = {}) {
+  if (!target) return enumerateMoves(handIds, { limit })
+  // Only the matching shape plus the two things that beat anything else.
+  const types = target.type === 'bomb' ? ['bomb', 'rocket'] : [target.type, 'bomb', 'rocket']
+  return enumerateMoves(handIds, { limit, types }).filter((candidate) => canBeat(candidate.move, target))
+}
+
+/** Stable identity for a shape, used to de-duplicate candidates. */
+export function moveKey(move) {
+  if (!move) return ''
+  return `${move.type}:${move.size}:${move.mainValue}:${move.sequenceLength}`
+}
+
+/**
+ * A greedy plan for emptying a hand: which groups to play, in order. Used by the
+ * bot as a *heuristic* — "how many turns do I still need?" — not as a rule. It is
+ * deliberately not optimal; it only has to rank two candidate moves correctly,
+ * and the priority order below is what makes the ranking sensible: shed whole
+ * structures before singles.
+ */
+export function handPlan(handIds = []) {
+  return memoized(PLAN_CACHE, cacheKey(handIds, 'plan'), () => planHand(handIds))
+}
+
+function planHand(handIds) {
+  const moves = []
+  let rest = [...handIds]
+  let guard = 0
+  while (rest.length && guard < 40) {
+    guard += 1
+    const candidates = enumerateMoves(rest, { types: PLAN_ORDER })
+    if (!candidates.length) break
+    let best = null
+    let bestScore = -Infinity
+    for (const candidate of candidates) {
+      const score = (PLAN_BONUS[candidate.move.type] ?? 0) + candidate.move.size
+      if (score > bestScore) {
+        bestScore = score
+        best = candidate
+      }
+    }
+    moves.push(best.move)
+    rest = removeCards(rest, best.cardIds)
+  }
+  return { moves, count: moves.length, leftover: rest }
+}
+
+/** Shape preference when shedding: structures first, singles last. */
+const PLAN_ORDER = [
+  'plane_pair',
+  'plane_single',
+  'plane',
+  'straight',
+  'pair_straight',
+  'four_two_pairs',
+  'four_two',
+  'triple_pair',
+  'triple_single',
+  'triple',
+  'pair',
+  'single',
+  'bomb',
+  'rocket',
+]
+
+const PLAN_BONUS = {
+  plane_pair: 14,
+  plane_single: 12,
+  plane: 10,
+  straight: 8,
+  pair_straight: 8,
+  four_two_pairs: 6,
+  four_two: 5,
+  triple_pair: 5,
+  triple_single: 4,
+  triple: 3,
+  pair: 2,
+  single: 0,
+  bomb: 20,
+  rocket: 22,
+}
+
+/** How many turns this hand still needs, by the greedy plan above. */
+export function movesToEmpty(handIds = []) {
+  return handPlan(handIds).count
+}
+
+/**
+ * Can any single opponent, holding only cards from `outstanding`, beat `shape`?
+ *
+ * This is sound *as a possibility*: it answers "is there a beating combination in
+ * the cards nobody has played yet", never "does seat 2 hold it". A bot may use
+ * this because every card it counts is public — its own hand plus everything
+ * played — but it must not use it to name a seat.
+ */
+export function beatableFromOutstanding(shape, outstanding) {
+  if (!shape) return true
+  if (shape.type === 'rocket') return false
+  const values = [...outstanding.keys()].sort((left, right) => left - right)
+  if (values.includes(BIG_JOKER) && values.includes(SMALL_JOKER)) return true
+  if (shape.type !== 'bomb' && values.some((value) => (outstanding.get(value) || 0) === 4)) return true
+
+  const higher = values.filter((value) => value > shape.mainValue)
+  const countAt = (value) => outstanding.get(value) || 0
+  switch (shape.type) {
+    case 'single':
+      return higher.some((value) => countAt(value) >= 1)
+    case 'pair':
+      return higher.some((value) => countAt(value) >= 2)
+    case 'triple':
+      return higher.some((value) => countAt(value) >= 3)
+    case 'bomb':
+      // Only a higher four-of-a-kind; the rocket was already handled above.
+      return higher.some((value) => countAt(value) === 4)
+    case 'triple_single':
+    case 'triple_pair':
+      return higher.some((value) => countAt(value) >= 3)
+    case 'four_two':
+    case 'four_two_pairs':
+      return false
+    case 'straight':
+    case 'pair_straight':
+    case 'plane':
+    case 'plane_single':
+    case 'plane_pair': {
+      const per = shape.type === 'pair_straight' || shape.type === 'plane_pair' ? 2 : shape.type === 'straight' ? 1 : 3
+      const length = shape.sequenceLength
+      const top = shape.mainValue - length + 1
+      // A beating run is a window of the same length starting strictly higher.
+      // Anything longer would not be the same shape and could not be played on it.
+      for (let start = top + 1; start + length - 1 <= MAX_SEQUENCE_VALUE; start += 1) {
+        let ok = true
+        for (let step = 0; step < length; step += 1) {
+          if (countAt(start + step) < per) {
+            ok = false
+            break
+          }
+        }
+        if (ok) return true
+      }
+      // The wings of a plane still have to exist, and this function does not model
+      // them: say "no" rather than overstate a certainty it cannot back up.
+      return false
+    }
+    default:
+      return true
+  }
+}
+
+/** Group a hand by rank value; each group is ordered weakest suit first. */
+function groupByValue(handIds) {
+  const groups = new Map()
+  for (const id of handIds) {
+    const card = cardFromId(id)
+    if (!card) continue
+    const list = groups.get(card.value)
+    if (list) list.push(id)
+    else groups.set(card.value, [id])
+  }
+  for (const list of groups.values()) {
+    list.sort((left, right) => SUITS.indexOf(cardFromId(left).suit) - SUITS.indexOf(cardFromId(right).suit))
+  }
+  return groups
+}
+
+function pick(groups, value, count) {
+  const list = groups.get(value)
+  return list && list.length >= count ? list.slice(0, count) : null
+}
+
+/**
+ * `total * per` extra cards for a structure, taken from the weakest ranks that
+ * are not part of it.
+ *
+ * With `per === 1` any cards do — 四带二 may carry a pair as its "two singles",
+ * so refusing to take two cards from one rank would silently lose legal moves.
+ * One card per rank is taken first, so a pair is only broken when the hand leaves
+ * no choice. With `per === 2` each chosen rank must supply a whole pair.
+ * Returns null when the hand cannot supply them.
+ */
+function weakestWings(groups, exclude, total, per, values) {
+  const skip = new Set(exclude)
+  const pool = values.filter((value) => !skip.has(value))
+  if (per === 1) {
+    const wings = []
+    for (const value of pool) {
+      wings.push(groups.get(value)[0])
+      if (wings.length === total) return wings
+    }
+    for (const value of pool) {
+      for (const id of groups.get(value).slice(1)) {
+        wings.push(id)
+        if (wings.length === total) return wings
+      }
+    }
+    return null
+  }
+  const wings = []
+  for (const value of pool) {
+    if ((groups.get(value)?.length ?? 0) < per) continue
+    wings.push(...pick(groups, value, per))
+    if (wings.length >= total * per) return wings
+  }
+  return null
+}
+
+/** Maximal runs of consecutive values (all <= A), keeping those >= `minLength`. */
+function runsOf(values, minLength) {
+  const sorted = [...values].filter((value) => value <= MAX_SEQUENCE_VALUE).sort((left, right) => left - right)
+  const runs = []
+  let start = 0
+  for (let index = 1; index <= sorted.length; index += 1) {
+    const broken = index === sorted.length || sorted[index] !== sorted[index - 1] + 1
+    if (!broken) continue
+    const run = sorted.slice(start, index)
+    start = index
+    if (run.length >= minLength) runs.push(run)
+  }
+  return runs
+}
+

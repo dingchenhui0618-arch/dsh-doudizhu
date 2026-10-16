@@ -311,18 +311,27 @@ test('an address box value becomes something fetch accepts', () => {
 })
 
 test('stored preferences survive nonsense and are capped', () => {
-  assert.deepEqual(prefsFrom(null), { x: null, y: null, collapsed: false, pane: 'table', name: '' })
-  assert.deepEqual(prefsFrom('nonsense'), { x: null, y: null, collapsed: false, pane: 'table', name: '' })
+  const base = { x: null, y: null, collapsed: false, pane: 'table', name: '', botLevel: 'medium' }
+  assert.deepEqual(prefsFrom(null), base)
+  assert.deepEqual(prefsFrom('nonsense'), base)
   assert.deepEqual(prefsFrom({ x: 10.6, y: -4, collapsed: true, pane: 'log', name: ' 小明 ' }), {
     x: 11,
     y: -4,
     collapsed: true,
     pane: 'log',
     name: '小明',
+    botLevel: 'medium',
   })
   assert.equal(prefsFrom({ x: 'abc' }).x, null)
   assert.equal(prefsFrom({ pane: 'evil' }).pane, 'table')
   assert.equal(prefsFrom({ collapsed: 'yes' }).collapsed, false, 'only a real true counts')
+
+  // The computer strength is a closed set: anything else falls back, so a stale
+  // or hand-edited localStorage value can never send an unknown level to the room.
+  assert.equal(prefsFrom({ botLevel: 'hell' }).botLevel, 'hell')
+  assert.equal(prefsFrom({ botLevel: 'impossible' }).botLevel, 'medium')
+  assert.equal(prefsFrom({ botLevel: null }).botLevel, 'medium')
+  assert.equal(prefsFrom({ botLevel: 3 }).botLevel, 'medium')
 
   // A real browser found this one: a stored `{"x":null}` must stay "no stored
   // position". `Number(null)` is 0, so coercing quietly turned it into the

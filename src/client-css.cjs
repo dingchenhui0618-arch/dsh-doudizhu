@@ -108,4 +108,11 @@ module.exports = `
 .ddz-log-item{display:flex;gap:6px;align-items:baseline}
 .ddz-log-item .ddz-at{color:var(--dsw-alias-label-secondary,#9aa);font-variant-numeric:tabular-nums}
 .ddz-divider{height:1px;background:var(--dsw-alias-border-l1,rgba(255,255,255,.1))}
+.ddz-chips{display:flex;gap:4px}
+.ddz-chips button{flex:1;padding:4px 0;font:inherit;font-size:12px;cursor:pointer;border-radius:7px;
+  background:transparent;color:var(--dsw-alias-label-secondary,#9aa);
+  border:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.14))}
+.ddz-chips button.on{background:var(--dsw-alias-brand-primary,#4a7dff);border-color:transparent;color:#fff}
+.ddz-chips button:disabled{opacity:.45;cursor:not-allowed}
+.ddz-badge.bot{color:#9ecbff;border-color:currentColor}
 `

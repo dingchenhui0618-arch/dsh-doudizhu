@@ -268,6 +268,7 @@ function SeatRow(props) {
     'ddz-seat' + (active ? ' active' : '') + (props.seat === props.youSeat ? ' me' : '') + (props.wide ? ' wide' : '')
   const marks = []
   if (role) marks.push(h('span', { key: 'role', className: 'ddz-badge ' + info.role }, role))
+  if (info.bot) marks.push(h('span', { key: 'bot', className: 'ddz-badge bot', title: UI.BOT_BLURBS[info.bot] || '' }, '电脑'))
   if (active) marks.push(h('span', { key: 'turn', className: 'ddz-badge turn' }, '行动中'))
   if (info.occupied && !info.connected) marks.push(h('span', { key: 'gone', className: 'ddz-badge gone' }, '掉线'))
   if (!info.occupied) marks.push(h('span', { key: 'empty', className: 'ddz-badge' }, '空位'))
@@ -400,6 +401,68 @@ function ShareBlock(props) {
   )
 }
 
+/**
+ * The computer controls. Host only: the computers belong to the room rather than
+ * to the seat, and a guest quietly adding one would be a surprise to everybody
+ * else at the table.
+ *
+ * Strength is one click at any time; the *number* of computers only changes
+ * between hands, so those buttons disable themselves mid-hand instead of letting
+ * the click come back as a red error.
+ */
+function BotPanel(props) {
+  const s = props.snapshot
+  if (!s || !s.isHost) return null
+  const seated = Number(s.botsSeated || 0)
+  const capacity = UI.botCapacity(s)
+  const level = UI.isBotLevel(s.botLevel) ? s.botLevel : UI.DEFAULT_BOT_LEVEL
+  const countLocked = Boolean(props.busy) || !s.canSetBotCount
+
+  function setCount(next) {
+    act({ type: 'bots', level: level, count: next })
+  }
+
+  const chips = h('div', { className: 'ddz-chips ddz-grow' }, UI.BOT_LEVELS.map(function (value) {
+    return h('button', {
+      key: value,
+      type: 'button',
+      className: value === level ? 'on' : '',
+      disabled: Boolean(props.busy) || !s.canSetBotLevel,
+      title: UI.BOT_BLURBS[value],
+      // Sending the count that is already there changes only the strength.
+      onClick: function () { act({ type: 'bots', level: value, count: seated }) },
+    }, UI.BOT_LABELS[value])
+  }))
+
+  return h('div', { className: 'ddz-col' },
+    h('div', { className: 'ddz-row' },
+      h('span', { className: 'ddz-label' }, '电脑'),
+      chips,
+    ),
+    h('div', { className: 'ddz-row' },
+      h('button', {
+        type: 'button',
+        className: 'ddz-btn sm primary',
+        disabled: countLocked || seated >= capacity || capacity === 0,
+        title: capacity === 0 ? '三个人都是真人了' : '把空位交给电脑，坐满就立刻开局',
+        onClick: function () { setCount(capacity) },
+      }, capacity === 0 ? '没有空位' : seated > 0 ? '再用电脑补齐' : '用电脑补齐空位'),
+      seated > 0
+        ? h('button', {
+            type: 'button',
+            className: 'ddz-btn sm ghost',
+            disabled: countLocked,
+            title: s.canSetBotCount ? '把电脑撤下，空位留给朋友' : '牌局进行中，等这局结束',
+            onClick: function () { setCount(0) },
+          }, '撤下电脑')
+        : null,
+      h('span', { className: 'ddz-grow' }),
+      h('span', { className: 'ddz-note' }, seated > 0 ? '在场 ' + seated + ' 个' : '一个都没上'),
+    ),
+    h('div', { className: 'ddz-note' }, UI.BOT_BLURBS[level]),
+  )
+}
+
 function Lobby(props) {
   const state = props.state
   const [mode, setMode] = React.useState('host')
@@ -416,7 +479,11 @@ function Lobby(props) {
 
   function onHost() {
     props.setPrefs({ name: String(name || '').trim().slice(0, 12) })
-    post('host', { port: Number(port) || 0, name: String(name || '').trim() })
+    post('host', {
+      port: Number(port) || 0,
+      name: String(name || '').trim(),
+      botLevel: props.prefs.botLevel,
+    })
   }
 
   function onJoin() {
@@ -469,6 +536,19 @@ function Lobby(props) {
           h('button', { type: 'button', className: 'ddz-btn primary', disabled: props.busy, onClick: onHost }, '开房'),
         ),
         h('div', { className: 'ddz-note' }, '开房后这台机器会成为权威，端口只在牌局期间打开。'),
+        h('div', { className: 'ddz-row' },
+          h('span', { className: 'ddz-label' }, '人机'),
+          h('div', { className: 'ddz-chips ddz-grow' }, UI.BOT_LEVELS.map(function (value) {
+            return h('button', {
+              key: value,
+              type: 'button',
+              className: value === props.prefs.botLevel ? 'on' : '',
+              title: UI.BOT_BLURBS[value],
+              onClick: function () { props.setPrefs({ botLevel: value }) },
+            }, UI.BOT_LABELS[value])
+          })),
+        ),
+        h('div', { className: 'ddz-note' }, '这是补位电脑的强度：开房后点「用电脑补齐空位」，一个人也能开局。'),
       )
     : h('div', { className: 'ddz-col' },
         h('div', { className: 'ddz-row' },
@@ -534,6 +614,7 @@ function StatusPanel(props) {
     identity,
     status ? h('div', { className: 'ddz-note' }, status) : null,
     state.role === 'host' ? h(ShareBlock, { state: state }) : null,
+    s ? h(BotPanel, { snapshot: s, busy: props.busy }) : null,
     state.role === 'guest' && state.guest
       ? h('div', { className: 'ddz-note' }, '已连上 ' + String(state.guest.baseUrl).replace(/^https?:\/\//, '') + '，' + (state.guest.seat + 1) + ' 号位')
       : null,

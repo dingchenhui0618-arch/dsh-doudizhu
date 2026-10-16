@@ -1,31 +1,41 @@
 /**
- * Room model: seats, identities, and the per-seat snapshot.
+ * Room model: seats, identities, computer seats, and the per-seat snapshot.
  *
- * This module is the security boundary. Everything a peer is allowed to learn
- * passes through `snapshotFor`, and that function is the only place that decides
- * which cards leave the authority. It is deliberately free of I/O so the leak
- * rules can be tested directly.
+ * This module is the security boundary. Two functions decide what any non-human
+ * mind learns:
  *
- * A room is mutable server-side state (it holds an rng function and waiter
- * callbacks, so it is not JSON). Snapshots are plain JSON. `seq` counts room
- * changes; the long poll uses it to decide whether to answer immediately.
+ * - `snapshotFor(room, seat)` — everything a peer is allowed to know. The only
+ *   place a card id may cross to another machine.
+ * - `botView(room, seat)` — everything a computer player is allowed to know. A
+ *   computer runs *inside* this process and could physically read any hand, so
+ *   the boundary cannot be a network filter; it is this object. It holds the
+ *   computer's own hand, the public play history, and card counts — never another
+ *   hand, never the deck order. `test/bot.test.mjs` pins its key set.
+ *
+ * It is deliberately free of I/O so the leak rules can be tested directly. A room
+ * is mutable server-side state (it holds an rng function and waiter callbacks, so
+ * it is not JSON). Snapshots are plain JSON. `seq` counts room changes; the long
+ * poll uses it to decide whether to answer immediately.
  */
 
 import { randomBytes, randomInt } from 'node:crypto'
 
+import { chooseAction } from './bot.js'
 import {
   PHASES,
   bidSeat,
   canPass,
   createGame,
+  highestBid,
   nextHand,
   passTurn,
   placeBid,
   playCards,
   startHand,
 } from './game.js'
-import { SEAT_COUNT } from './rules.js'
+import { SEAT_COUNT, enumerateBeats, enumerateMoves, smallestLead } from './rules.js'
 import { randomCode } from './rng.js'
+import { DEFAULT_BOT_LEVEL, botSeatLabel, isBotLevel } from './ui-logic.js'
 
 export const PROTOCOL = 1
 
@@ -85,6 +95,28 @@ function syncNames(room) {
   room.game = { ...room.game, players: room.game.players.map((p) => ({ ...p, name: names[p.seat] })) }
 }
 
+/** A hand is in progress: the deal has happened and seats are frozen. */
+function midHand(room) {
+  return room.game.phase === PHASES.BIDDING || room.game.phase === PHASES.PLAYING
+}
+
+function botSeats(room) {
+  return room.seats.filter((seat) => Boolean(seat?.bot))
+}
+
+function makeBotSeat(seat, level) {
+  return {
+    seat,
+    name: botSeatLabel(level),
+    // No token: `seatForToken` never matches a bot, so a computer can never be
+    // addressed as a human and a human can never inherit a computer's seat.
+    token: null,
+    connected: true,
+    joinedAt: Date.now(),
+    bot: level,
+  }
+}
+
 /** Deal without touching `seq`; the caller decides how to announce it. */
 function deal(room, { countHand = true } = {}) {
   const result = startHand(room.game, { rng: room.rng, countHand })
@@ -123,6 +155,10 @@ export function createRoom({ code = randomCode(6), name = '斗地主房间', rng
     rng,
     waiters: new Set(),
     createdAt: Date.now(),
+    /** The seat that owns the room's setup; the first human to sit down. */
+    hostSeat: null,
+    /** Strength applied to new and existing computer seats. */
+    botLevel: DEFAULT_BOT_LEVEL,
   }
 }
 
@@ -143,11 +179,15 @@ export function roomInfo(room) {
     handNo: room.game.handNo,
     seatsTaken: room.seats.filter(Boolean).length,
     free: room.seats.filter((seat) => seat === null).length,
+    humans: room.seats.filter((seat) => seat && !seat.bot).length,
+    bots: botSeats(room).length,
+    botLevel: room.botLevel,
     seats: room.seats.map((seat, index) => ({
       seat: index,
       occupied: Boolean(seat),
       connected: Boolean(seat?.connected),
       name: seat?.name ?? null,
+      bot: seat?.bot ?? null,
     })),
   }
 }
@@ -156,7 +196,8 @@ export function roomInfo(room) {
  * Take a seat. Passing a known `token` rejoins the same seat with its hand
  * intact; an unknown token is refused rather than silently reseated, so a stale
  * link cannot be mistaken for a new player. When the third seat fills, the first
- * hand is dealt automatically.
+ * hand is dealt automatically — computers occupy seats, so "third seat" simply
+ * means the last one, human or not.
  */
 export function joinSeat(room, { name, token, code } = {}) {
   if (code !== undefined && code !== null && String(code).toUpperCase() !== room.code) {
@@ -174,11 +215,28 @@ export function joinSeat(room, { name, token, code } = {}) {
     return { ok: true, seat: existing, token, rejoin: true }
   }
 
-  const free = room.seats.findIndex((seat) => seat === null)
-  if (free === -1) return { ok: false, error: '房间已满（三人）', reason: 'full' }
+  let free = room.seats.findIndex((seat) => seat === null)
+  if (free === -1) {
+    // A friend arriving beats a computer. Giving up the highest computer seat is
+    // only safe between hands: mid-hand the cards are already dealt.
+    const botAt = room.seats.reduce((found, seat, index) => (seat?.bot ? index : found), -1)
+    if (botAt >= 0 && !midHand(room)) {
+      room.seats[botAt] = null
+      bump(room, '电脑让位')
+      free = botAt
+    }
+    if (free === -1) {
+      return {
+        ok: false,
+        error: midHand(room) ? '房间已满，牌局进行中不能换人' : '房间已满（三人）',
+        reason: 'full',
+      }
+    }
+  }
 
   const issued = randomBytes(24).toString('hex')
   room.seats[free] = { seat: free, name: cleanName(name, free), token: issued, connected: true, joinedAt: Date.now() }
+  if (room.hostSeat === null) room.hostSeat = free
   const started = maybeStart(room)
   bump(room, `${room.seats[free].name} 入座${started ? '，开局' : ''}`)
   return { ok: true, seat: free, token: issued, rejoin: false, started }
@@ -196,25 +254,88 @@ export function setConnected(room, token, connected) {
 }
 
 /**
- * Apply one player action. Returns `{ ok, seat }` on success; the caller then
- * asks for that seat's snapshot. Every rule decision is delegated to the engine,
- * so an out-of-turn or illegal action is refused there rather than here.
+ * Arrange the computer seats. Host-only, because the computers belong to the
+ * room and not to whoever happens to be sitting in it.
+ *
+ * Two separate knobs share one action:
+ * - `level` alone changes the strength of the computers already seated, and is
+ *   allowed at any time — that is the "switchable strength" control.
+ * - `count` adds or removes seats, and is only allowed between hands, because
+ *   adding a seat mid-hand would create a player with no cards.
  */
-export function act(room, token, action) {
-  const seat = seatForToken(room, token)
-  if (seat === null) return { ok: false, error: '身份无效，请重新入座', reason: 'unauthorized' }
+function setBots(room, seat, action) {
+  if (room.hostSeat !== null && seat !== room.hostSeat) return { ok: false, error: '只有房主能安排电脑' }
+  const level = isBotLevel(action.level) ? String(action.level) : room.botLevel
+  const current = botSeats(room).length
+  const humans = room.seats.filter((entry) => entry && !entry.bot).length
+  const wantsCount = action.count !== undefined && action.count !== null
+  const wanted = wantsCount
+    ? Math.max(0, Math.min(SEAT_COUNT - humans, Math.round(Number(action.count) || 0)))
+    : current
 
+  if (wanted !== current && midHand(room)) {
+    return { ok: false, error: '牌局进行中，等这局结束再改电脑数量（强度可以随时换）' }
+  }
+
+  room.botLevel = level
+  for (const entry of room.seats) {
+    if (!entry?.bot) continue
+    entry.bot = level
+    entry.name = botSeatLabel(level)
+  }
+
+  let added = 0
+  let removed = 0
+  if (wanted > current) {
+    for (let index = SEAT_COUNT - 1; index >= 0 && added < wanted - current; index -= 1) {
+      if (room.seats[index] === null) {
+        room.seats[index] = makeBotSeat(index, level)
+        added += 1
+      }
+    }
+  } else if (wanted < current) {
+    for (let index = SEAT_COUNT - 1; index >= 0 && removed < current - wanted; index -= 1) {
+      if (room.seats[index]?.bot) {
+        room.seats[index] = null
+        removed += 1
+      }
+    }
+  }
+
+  syncNames(room)
+  const started = maybeStart(room)
+  const bots = botSeats(room).length
+  const note = [
+    added ? `加入 ${added} 个电脑` : '',
+    removed ? `撤下 ${removed} 个电脑` : '',
+    !added && !removed && wantsCount ? `电脑数量已是 ${bots}` : '',
+    !wantsCount ? `电脑强度改为${botSeatLabel(level).replace('电脑·', '')}` : '',
+    started ? '，开局' : '',
+  ]
+    .filter(Boolean)
+    .join('')
+  bump(room, note ? `${note}` : null)
+  return { ok: true, seat, level, bots, added, removed, started }
+}
+
+/**
+ * Apply one player action for a seat. Every rule decision is delegated to the
+ * engine, so an out-of-turn or illegal action is refused there rather than here.
+ */
+export function applyAction(room, seat, action) {
   const type = String(action?.type ?? '')
   const game = room.game
 
   if (type === 'start') {
     if (game.phase !== PHASES.LOBBY) return { ok: false, error: '已经开局' }
-    if (room.seats.some((s) => s === null)) return { ok: false, error: '要三个人都到齐才能开局' }
+    if (room.seats.some((s) => s === null)) return { ok: false, error: '要三个人都到齐才能开局（可以用电脑补齐）' }
     syncNames(room)
     if (!deal(room)) return { ok: false, error: '发牌失败' }
     bump(room, '开局')
     return { ok: true, seat }
   }
+
+  if (type === 'bots') return setBots(room, seat, action)
 
   if (type === 'next') {
     const result = nextHand(game, { rng: room.rng })
@@ -257,6 +378,109 @@ export function act(room, token, action) {
   return { ok: false, error: `未知操作：${type || '(空)'}` }
 }
 
+/**
+ * Apply one action on behalf of whoever holds `token`. Kept as a thin wrapper so
+ * the authority's route and the local host half share one entry point, while
+ * computers — who have no token by construction — go through `applyAction`.
+ */
+export function act(room, token, action) {
+  const seat = seatForToken(room, token)
+  if (seat === null) return { ok: false, error: '身份无效，请重新入座', reason: 'unauthorized' }
+  return applyAction(room, seat, action)
+}
+
+/* ------------------------------------------------------------ computers -- */
+
+/**
+ * Everything a computer is allowed to know. This is the fairness boundary: it is
+ * built field by field, so a hand it must not see cannot leak in by accident, and
+ * `BOT_VIEW_KEYS` in bot.js pins the shape so a later "just add the hands, it is
+ * faster" cannot pass unnoticed.
+ */
+export function botView(room, seat) {
+  const game = room.game
+  const player = game.players[seat]
+  if (!player) return null
+  return {
+    difficulty: room.seats[seat]?.bot ?? room.botLevel,
+    seat,
+    phase: game.phase,
+    role: roleOf(game, seat),
+    hand: [...player.hand],
+    handCounts: game.players.map((entry) => ({
+      seat: entry.seat,
+      count: entry.hand.length,
+      role: roleOf(game, entry.seat),
+      isBot: Boolean(room.seats[entry.seat]?.bot),
+    })),
+    playedIds: game.plays.flatMap((play) => play.cards),
+    landlordSeat: game.landlordSeat,
+    dealerSeat: game.dealerSeat,
+    toAct: game.toAct,
+    target: game.lastPlay ? { ...game.lastPlay.move } : null,
+    targetSeat: game.lastPlay?.seat ?? null,
+    passes: game.passes,
+    canPass: canPass(game, seat),
+    bidTurnSeat: bidSeat(game),
+    highestBid: highestBid(game),
+  }
+}
+
+/** The computer whose turn it is, or null when a human should act. */
+export function botTurnSeat(room) {
+  const game = room.game
+  let seat = null
+  if (game.phase === PHASES.BIDDING) seat = bidSeat(game)
+  else if (game.phase === PHASES.PLAYING) seat = game.toAct
+  if (seat === null || seat === undefined) return null
+  return room.seats[seat]?.bot ? seat : null
+}
+
+/** A legal move that ignores strategy: the cheapest thing that beats the table. */
+function fallbackAction(view) {
+  const moves = view.target ? enumerateBeats(view.hand, view.target) : enumerateMoves(view.hand)
+  if (moves.length) {
+    const cheapest = [...moves].sort((left, right) => left.move.mainValue - right.move.mainValue)[0]
+    return { type: 'play', cards: cheapest.cardIds }
+  }
+  if (view.canPass) return { type: 'pass' }
+  const lead = smallestLead(view.hand)
+  return lead.length ? { type: 'play', cards: lead } : null
+}
+
+/** The move that is legal by construction: pass when following, else a single. */
+function forcedAction(view) {
+  if (view.canPass) return { type: 'pass' }
+  const lead = smallestLead(view.hand)
+  return lead.length ? { type: 'play', cards: lead } : null
+}
+
+/**
+ * Let one computer take its turn.
+ *
+ * Strategy is allowed to be wrong; a table that stops is not. Every attempt is
+ * therefore checked against the real engine, and a fallback chain guarantees a
+ * legal action as long as one exists. If even that fails, the failure is written
+ * into the room log instead of leaving three people staring at a frozen table.
+ */
+export function applyBotAction(room, seat, { rand = Math.random } = {}) {
+  if (!room.seats[seat]?.bot) return { ok: false, error: '这个座位不是电脑', action: null }
+  const view = botView(room, seat)
+  const chosen = chooseAction(view, { rand })
+  let lastError = ''
+  for (const action of [chosen, fallbackAction(view), forcedAction(view)]) {
+    if (!action) continue
+    const result = applyAction(room, seat, action)
+    if (result.ok) {
+      if (action !== chosen) bump(room, `${room.seats[seat].name} 走了保底出法`)
+      return { ok: true, seat, action, fallback: action !== chosen }
+    }
+    lastError = result.error
+  }
+  bump(room, `${displayName(room, seat)} 出手失败：${lastError || '没有合法出法'}`)
+  return { ok: false, error: lastError || '没有合法出法', action: null }
+}
+
 function roleOf(game, seat) {
   if (game.landlordSeat === null) return null
   return game.landlordSeat === seat ? 'landlord' : 'farmer'
@@ -290,7 +514,11 @@ function hintFor(room, seat) {
     return `${game.winnerSide === 'landlord' ? '地主' : '农民'}获胜（${seatName} 先出完）`
   }
   if (game.phase === PHASES.REDEAL) return '三家都不叫，正在重新发牌'
-  return room.seats.filter(Boolean).length < SEAT_COUNT ? '等待其他玩家入座' : '准备开始'
+  const free = room.seats.filter((entry) => entry === null).length
+  if (free > 0) {
+    return room.hostSeat === seat ? `还差 ${free} 人；也可以让电脑补齐` : `还差 ${free} 人，等房主安排`
+  }
+  return '准备开始'
 }
 
 /**
@@ -312,6 +540,7 @@ export function snapshotFor(room, seat) {
     name: displayName(room, player.seat),
     occupied: Boolean(room.seats[player.seat]),
     connected: Boolean(room.seats[player.seat]?.connected),
+    bot: room.seats[player.seat]?.bot ?? null,
     role: roleOf(game, player.seat),
     count: player.hand.length,
     isTurn: game.toAct === player.seat,
@@ -358,6 +587,13 @@ export function snapshotFor(room, seat) {
     handsWon: { ...game.handsWon },
     secretsRevealed: revealAll,
     seatsTaken: room.seats.filter(Boolean).length,
+    botLevel: room.botLevel,
+    botsSeated: botSeats(room).length,
+    hostSeat: room.hostSeat,
+    // Strength is switchable at any time; the number of computers is not.
+    isHost: room.hostSeat === seat,
+    canSetBotLevel: room.hostSeat === seat,
+    canSetBotCount: room.hostSeat === seat && !midHand(room),
     canAct: game.phase === PHASES.PLAYING && game.toAct === seat,
     canBid: game.phase === PHASES.BIDDING && bidSeat(game) === seat,
     canPass: canPass(game, seat),
