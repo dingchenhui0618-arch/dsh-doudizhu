@@ -17,7 +17,7 @@ import test from 'node:test'
 import vm from 'node:vm'
 
 import { PHASES, placeBid } from '../src/game.js'
-import { act, createRoom, joinSeat, snapshotFor } from '../src/room.js'
+import { act, applyAction, createRoom, joinSeat, snapshotFor } from '../src/room.js'
 import { seedRandom } from '../src/rng.js'
 import { canBeat, cardFromId, classifyMove } from '../src/rules.js'
 
@@ -364,6 +364,13 @@ function playOutHand(room, tokens) {
   return steps
 }
 
+/** The actions the window actually posted to the host half, in order. */
+function sentActions(harness) {
+  return harness.calls
+    .filter((call) => call.url === '/dsh-doudizhu/act')
+    .map((call) => JSON.parse(call.init.body).action)
+}
+
 /* ---------------------------------------------------------------- tests --- */
 
 test('the bundle registers the plugin face the host expects', () => {
@@ -581,6 +588,76 @@ test('the poller echoes the local token and stops when disposed', async () => {
   // The poller is the first effect the plugin registers.
   harness.effects[0].dispose()
   assert.equal(harness.intervals.size, 0, 'dispose 要把轮询停掉')
+})
+
+test('a host alone in the room can fill the table with computers', async () => {
+  // This is the whole point of the feature: one person, one click, a real hand.
+  // The click is asserted on the wire, because a button that posts the wrong
+  // field names is exactly how 「加入」 was broken for three releases.
+  const room = createRoom({ code: 'SOLO01', rng: seedRandom(31) })
+  const host = joinSeat(room, { name: '我' })
+  const snapshot = snapshotFor(room, host.seat)
+  assert.equal(snapshot.isHost, true)
+  assert.equal(snapshot.botsSeated, 0)
+  assert.equal(snapshot.canSetBotCount, true, '还没开局，数量可以调')
+
+  const harness = await mountMini(hosted(snapshot))
+  let nodes = look(harness)
+  assert.ok(textOf(nodes).includes('电脑'), '房主看得到电脑那一栏')
+  assert.equal(findButton(nodes, '撤下电脑'), null, '一个电脑都没上，就没有撤下一说')
+
+  const fill = findButton(nodes, '用电脑补齐空位')
+  assert.ok(fill, '找到补齐按钮')
+  assert.equal(fill.props.disabled, false, '一个人在场时补齐按钮能点')
+
+  // 补齐 asks for the number that fills the table, at the room's current strength.
+  // That request is what starts the deal, so the field names matter.
+  fill.props.onClick()
+  await harness.settle()
+  assert.deepEqual(sentActions(harness).at(-1), { type: 'bots', level: 'medium', count: 2 })
+
+  // Picking a strength is its own click, and it must not change how many are seated
+  // — the window echoes the count the room already has.
+  nodes = look(harness)
+  const hell = findButton(nodes, '地狱')
+  assert.ok(hell, '四个强度都在')
+  assert.equal(findButton(nodes, '撤下电脑'), null, '一个电脑都没上，就没有撤下一说')
+  hell.props.onClick()
+  await harness.settle()
+  assert.deepEqual(sentActions(harness).at(-1), { type: 'bots', level: 'hell', count: 0 })
+})
+
+test('only the host sees the computer controls, and the count is frozen mid-hand', async () => {
+  const room = createRoom({ code: 'GUEST1', rng: seedRandom(32) })
+  joinSeat(room, { name: '甲' })
+  const guest = joinSeat(room, { name: '乙' })
+  const asGuest = await mountMini(hosted(snapshotFor(room, guest.seat)))
+  assert.equal(findButton(look(asGuest), '用电脑补齐空位'), null, '客人不该看到房主的电脑按钮')
+  assert.equal(findButton(look(asGuest), '简单'), null, '连强度也不给客人看')
+
+  // Mid-hand: the strength stays switchable, the number does not.
+  const mid = createRoom({ code: 'MIDHAN', rng: seedRandom(33) })
+  const host = joinSeat(mid, { name: '我' })
+  assert.ok(applyAction(mid, host.seat, { type: 'bots', level: 'medium', count: 2 }).started)
+  const snapshot = snapshotFor(mid, host.seat)
+  assert.equal(snapshot.phase, PHASES.BIDDING)
+  assert.equal(snapshot.botsSeated, 2)
+  assert.equal(snapshot.canSetBotLevel, true, '局中也能换强度')
+  assert.equal(snapshot.canSetBotCount, false, '局中不能改数量')
+  assert.ok(snapshot.seats.some((info) => info.name === '电脑·中等'), '座位上是电脑的名字')
+
+  const harness = await mountMini(hosted(snapshot))
+  const nodes = look(harness)
+  assert.ok(textOf(nodes).includes('电脑·中等'), '牌桌上看得出哪两个是电脑')
+  assert.ok(textOf(nodes).includes('在场 2 个'))
+  assert.equal(findButton(nodes, '撤下电脑').props.disabled, true, '局中撤不下电脑')
+  assert.equal(findButton(nodes, '再用电脑补齐').props.disabled, true, '已经坐满了，也不用再补')
+
+  const hell = findButton(nodes, '地狱')
+  assert.equal(hell.props.disabled, false, '局中换强度仍可点')
+  hell.props.onClick()
+  await harness.settle()
+  assert.deepEqual(sentActions(harness).at(-1), { type: 'bots', level: 'hell', count: 2 })
 })
 
 test('a snapshot that has not arrived yet still renders', async () => {
