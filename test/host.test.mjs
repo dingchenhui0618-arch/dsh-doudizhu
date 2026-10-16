@@ -382,6 +382,46 @@ test('three seats play a whole hand through the local API and the LAN port', asy
   assert.deepEqual(next.data.snapshot.you.hand.length, 17)
 })
 
+test('加入 accepts exactly the body the floating window sends', async (t) => {
+  // Regression for the bug that kept the other two machines out of the room: the
+  // window posted `baseUrl` while becomeGuest read `url`, so 加入 always came
+  // back with 「请填写房主地址（例如 …）」 no matter what the player typed, and no
+  // seat was ever taken. The only test of this route posted `{host, port}`, the
+  // *other* accepted shape, so the suite stayed green.
+  const hostMachine = await mount(t, { port: 0, playerName: '房主' })
+  const hostClient = localClient(hostMachine.baseUrl)
+  await hostClient.get() // GET once for the token, then POST with it
+  const hosted = await hostClient.post('host', { port: 0 })
+  assert.ok(hosted.data.ok, hosted.data.error)
+  const { code, port } = hosted.data.authority
+
+  // Literally what src/client.cjs onJoin() posts.
+  const guestMachine = await mount(t, { port: 0, playerName: '客人' })
+  const guestClient = localClient(guestMachine.baseUrl)
+  await guestClient.get()
+  const joined = await guestClient.post('join', { url: `http://127.0.0.1:${port}`, code, name: '客人' })
+  assert.ok(joined.data.ok, joined.data.error)
+  assert.equal(joined.data.role, 'guest')
+  assert.equal(joined.data.guest.seat, 1)
+
+  // The older `baseUrl` shape keeps working, so shipping the fix does not require
+  // every machine to update on the same day.
+  const thirdMachine = await mount(t, { port: 0, playerName: '第三人' })
+  const thirdClient = localClient(thirdMachine.baseUrl)
+  await thirdClient.get()
+  const viaLegacy = await thirdClient.post('join', { baseUrl: `http://127.0.0.1:${port}`, code, name: '第三人' })
+  assert.ok(viaLegacy.data.ok, viaLegacy.data.error)
+  assert.equal(viaLegacy.data.guest.seat, 2)
+
+  // And a genuinely empty address is still refused with the message the player saw.
+  const emptyMachine = await mount(t, { port: 0, playerName: '空的' })
+  const emptyClient = localClient(emptyMachine.baseUrl)
+  await emptyClient.get()
+  const empty = await emptyClient.post('join', { code, name: '空的' })
+  assert.equal(empty.data.ok, false)
+  assert.match(empty.data.error, /请填写房主地址/)
+})
+
 test('a second plugin instance joins as a guest and plays through its own local API', async (t) => {
   const hostMachine = await mount(t, { port: 0, playerName: '房主' })
   const guestMachine = await mount(t, { port: 0, playerName: '客人' })

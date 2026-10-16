@@ -425,7 +425,7 @@ function Lobby(props) {
     if (!/^[A-Za-z0-9]{4,8}$/.test(String(code).trim())) { setLocal('房间码是 6 位字母数字'); return }
     props.setPrefs({ name: String(name || '').trim().slice(0, 12) })
     setLocal('')
-    post('join', { baseUrl: base, code: String(code).trim().toUpperCase(), name: String(name || '').trim() })
+    post('join', { url: base, code: String(code).trim().toUpperCase(), name: String(name || '').trim() })
   }
 
   function onProbe() {

@@ -7,6 +7,22 @@
 
 ### 修复
 
+- **「加入」按钮从来没成功过（v0.1.2）。** 浮窗 `onJoin()` 发的是 `{ baseUrl, code, name }`，
+  宿主 `becomeGuest()` 读的是 `input.url`，于是 `baseUrl` 解析成空串并直接返回
+  「请填写房主地址（例如 …）」——**地址栏里填什么都不会变，座位从来没被占到**。
+  同事截图上的那句红字就是它。
+  为什么一直没发现：这条路由唯一的测试用的是 `{ host, port }`（宿主接受的另一种形状），
+  客户端发的是第三种形状，两边各自都"对"，中间没人对；而 `检查` 恰好读 `url`，所以症状
+  看着像网络不通（检查能连上、加入进不去）。
+  修法：客户端改发规范字段 `{ url, code, name }`；宿主 `becomeGuest`/`probe` 同时接受
+  `url` 与 `baseUrl`，已装旧版的机器不更新也不会被落下。
+  补 4 个测试（总数 118）：`test/contract.test.mjs` 读 `src/client.cjs` 源码抽出每个请求体的
+  顶层字段，对着 `src/ui-logic.js` 新增的 `ROUTE_BODIES` 路由表核对（扫描不到请求体即失败，
+  避免空扫描通过；实测把客户端改回 `baseUrl` 就会报「加入 必须发 url 字段」）；
+  `test/host.test.mjs` 把客户端真正会发的 `{ url }` 打到真实插件实例上，并覆盖
+  `{ baseUrl }` 与空地址。
+  实测：旧宿主半区下 `join {baseUrl}` → 409「请填写房主地址」，`join {url}` → 200
+  `role=guest seat=1`，离开后回到 `idle`。
 - **分享出去的是一个连不上的地址。** `lanAddresses()` 用 `Object.values(networkInterfaces())`
   丢掉了网卡名，所以分不清真网卡和虚拟网卡，把 WSL 的 `vEthernet` 地址（`172.22.0.1`）
   和真实 WLAN 地址并列成 `地址 192.168.1.50:8791 或 172.22.0.1:8791` 一起发给别人——

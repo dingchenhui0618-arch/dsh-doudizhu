@@ -277,7 +277,14 @@ export function apply(ctx, config) {
     const port = String(input.port ?? '').trim()
     const code = String(input.code ?? '').trim().toUpperCase()
     const playerName = typeof input.name === 'string' && input.name.trim() ? input.name.trim() : settings.playerName
-    const baseUrl = String(input.url ?? '').trim() || (host ? `http://${host}${port ? `:${port}` : ''}` : '')
+    // `url` is the canonical field. `baseUrl` is what an already-installed client
+    // used to send — read it too, so shipping the fix does not require everyone to
+    // update on the same day. `host` + `port` is what the tests and the older
+    // hand-written flows use.
+    const baseUrl =
+      String(input.url ?? '').trim() ||
+      String(input.baseUrl ?? '').trim() ||
+      (host ? `http://${host}${port ? `:${port}` : ''}` : '')
 
     if (!baseUrl) return { ok: false, error: '请填写房主地址（例如 192.168.1.50:8791）' }
     if (!code) return { ok: false, error: '请填写房间码' }
@@ -310,7 +317,10 @@ export function apply(ctx, config) {
   async function probe(input = {}) {
     const host = String(input.host ?? '').trim()
     const port = String(input.port ?? '').trim()
-    const baseUrl = String(input.url ?? '').trim() || (host ? `http://${host}${port ? `:${port}` : ''}` : '')
+    const baseUrl =
+      String(input.url ?? '').trim() ||
+      String(input.baseUrl ?? '').trim() ||
+      (host ? `http://${host}${port ? `:${port}` : ''}` : '')
     if (!baseUrl) return { ok: false, error: '请填写房主地址' }
     try {
       const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/hello`)

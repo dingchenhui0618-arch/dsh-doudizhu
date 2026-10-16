@@ -228,7 +228,7 @@ DSH 自己的 Web 认证**不覆盖插件用 `ctx.webServer.register` 挂的 pre
 （所以这个仓库的 `.gitignore` 故意**不**忽略 `lib/`）。把这一行地址交给 DSH 的插件管理器：
 
 ```
-https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.1.1/dsh-doudizhu-0.1.1.tgz
+https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.1.2/dsh-doudizhu-0.1.2.tgz
 ```
 
 三条路都通向同一个动作，挑顺手的：
@@ -297,7 +297,17 @@ netsh advfirewall firewall delete rule name="dsh-doudizhu 8791"
 
 ## 同事连不上怎么排查
 
-按顺序排，别一次改三样：
+**先看这条：v0.1.1 及更早版本的「加入」按钮是坏的。** 浮窗发的是 `baseUrl`，宿主读的是
+`url`，字段名对不上，于是 `加入` 永远返回 `请填写房主地址（例如 …）`——**地址填得再对也进不去**，
+座位从来没被占到。`检查` 能通（那条路由正好读 `url`），所以症状看着像"网络不通"，实际是本机
+两个半区之间的字段错位。v0.1.2 已修。判据：如果同事点 `检查` 得到"连上了"、点 `加入` 得到
+`请填写房主地址` 而地址栏里明明有内容，就是这个问题。
+
+装完新版**只需要把插件关掉再打开一次**，不用重启 DSH——客户端半区会经 HMR 换掉。实测这个
+边界是分开的：切插件能换客户端半区，**换不掉宿主半区**（切完 `/state` 里缺的仍是新宿主
+字段），宿主半区的改动要重启 DSH 才生效。这个 bug 的修复在客户端，所以切一次就够。
+
+其余按顺序排，别一次改三样：
 
 1. **地址是不是虚拟网卡的。** 主机装了 WSL / Docker / 虚拟机 / VPN 时，
    `os.networkInterfaces()` 会把那些网卡的地址一起给出（例如 `172.22.0.1` 是 WSL 的

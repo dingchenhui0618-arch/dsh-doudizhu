@@ -227,6 +227,25 @@ export function playEntries(snapshot) {
 }
 
 /**
+ * The request bodies the plugin's own routes accept, as one source of truth
+ * shared by both halves.
+ *
+ * `test/contract.test.mjs` pins the floating window to this table. It exists
+ * because the two halves once disagreed on a single field name: the window
+ * posted `baseUrl` while the host read `url`, so 加入 always came back with
+ * 「请填写房主地址」 no matter what the player typed, and no seat was ever taken.
+ * Every mechanical check stayed green, because the only test of that route used
+ * the *other* accepted shape.
+ */
+export const ROUTE_BODIES = {
+  host: ['port', 'name'],
+  join: ['url', 'code', 'name'],
+  probe: ['url'],
+  act: ['action'],
+  leave: [],
+}
+
+/**
  * Which addresses to show as one-tap copy chips. Real adapters only: a virtual
  * adapter listed next to a real one turns "which address do I send?" into a coin
  * flip, and the virtual one always loses.
