@@ -12,12 +12,14 @@
  *   - the bundle is the real `lib/client.js` (the same file DSH would serve)
  *   - `/dsh-doudizhu/*` is proxied to the live, running plugin, so the window
  *     polls real room state and posts real actions
+ *   - the `--dsw-…` theme tokens are read out of the installed DSH (`--theme
+ *     dark|light|none`), so the page shows the colours the real window gets
  *
  * The proxy drops `Origin` / `Referer` / `sec-fetch-site`, which is what a
  * browser cannot do and a local process can. That is the honest shape of the
  * plugin's origin check: it stops cross-site pages, not local callers.
  *
- *   node scripts/browser-harness.mjs [--port 8792] [--target http://127.0.0.1:19387]
+ *   node scripts/browser-harness.mjs [--port 8792] [--target http://127.0.0.1:19387] [--theme dark]
  *
  * The React UMD files are expected in `_tmp/` (see README); they are fetched
  * once so the browser itself never needs the network.
@@ -28,6 +30,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readInstalledTokens, PLUGIN_TOKENS } from './dsh-theme.mjs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const TMP = join(ROOT, '_tmp')
@@ -39,6 +42,34 @@ function flag(name, fallback) {
 
 const PORT = Number(flag('port', '8792'))
 const TARGET = String(flag('target', 'http://127.0.0.1:19387')).replace(/\/+$/, '')
+const THEME = String(flag('theme', 'dark'))
+
+/**
+ * Inject the *real* DSH theme tokens, read out of the installed app.
+ *
+ * Without this the page has no `--dsw-…` variables at all, so every one of them
+ * falls back to our own dark defaults — which is exactly how a white-on-white
+ * primary button (the dark theme sets `--dsw-alias-brand-primary` to `#f9fafb`)
+ * stayed invisible here while being obvious in the real window. The harness is
+ * only worth running if it can show what the user sees.
+ */
+function themeStyle(theme) {
+  if (theme === 'none') return { css: '', note: '主题 token：未注入（--theme none）' }
+  try {
+    const { themes } = readInstalledTokens()
+    const tokens = themes[theme]
+    if (!tokens || !Object.keys(tokens).length) throw new Error(`没有 ${theme} 的 token`)
+    const body = Object.entries(tokens).map(([name, value]) => `${name}:${value}`).join(';')
+    return {
+      css: `body{${body}}`,
+      note: `主题 token：${theme}（${Object.keys(tokens).length}/${PLUGIN_TOKENS.length} 个，读自已安装的 DSH）`,
+    }
+  } catch (error) {
+    return { css: '', note: `主题 token：注入失败（${error.message}）—— 页面走插件自带的暗色兜底` }
+  }
+}
+
+const THEME_INFO = themeStyle(THEME)
 
 const PAGE = `<!doctype html>
 <html lang="zh-CN">
@@ -56,10 +87,13 @@ const PAGE = `<!doctype html>
   #boot.failed { color: #ff6b6b; }
   .harness-tag { margin: 0 0 6px; color: #6f6f80; font-size: 11px;
     letter-spacing: .04em; text-transform: uppercase; }
+  #theme-note { margin: 8px 0 0; color: #9a9aa8; font-size: 11px; }
 </style>
+<style id="dsh-tokens">/* THEME_CSS */</style>
 </head>
 <body>
 <div id="boot">正在加载客户端半区…</div>
+<p id="theme-note">/* THEME_NOTE */</p>
 <div id="layer"></div>
 <div id="view"></div>
 <script src="/react.js"></script>
@@ -199,7 +233,10 @@ async function proxy(req, res, body) {
 const server = createServer(async (req, res) => {
   const path = String(req.url || '/').split('?')[0]
   try {
-    if (path === '/' || path === '/index.html') return send(res, 200, 'text/html; charset=utf-8', PAGE)
+    if (path === '/' || path === '/index.html') {
+      const page = PAGE.replace('/* THEME_CSS */', THEME_INFO.css).replace('/* THEME_NOTE */', THEME_INFO.note)
+      return send(res, 200, 'text/html; charset=utf-8', page)
+    }
     if (path === '/react.js') return await sendFile(res, join(TMP, 'react.js'), 'application/javascript; charset=utf-8')
     if (path === '/react-dom.js') return await sendFile(res, join(TMP, 'react-dom.js'), 'application/javascript; charset=utf-8')
     if (path === '/client.js') return await sendFile(res, join(ROOT, 'lib', 'client.js'), 'application/javascript; charset=utf-8')
@@ -221,4 +258,5 @@ for (const required of ['react.js', 'react-dom.js']) {
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`harness  http://127.0.0.1:${PORT}/`)
   console.log(`target   ${TARGET}`)
+  console.log(`theme    ${THEME} — ${THEME_INFO.note}`)
 })

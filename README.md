@@ -5,7 +5,7 @@ DeepSeek Harness 的插件：**三人局域网斗地主**。三个人各自在�
 （简单 / 中等 / 困难 / 地狱）随时可换，一个人或两个人照样能打完整一局。
 
 > **当前进度：规则引擎、牌局状态机、权威房间服务与传输、DSH 插件两个半区（host + 浮窗/标签页
-> 客户端）、电脑玩家都已完成并有测试覆盖（144 个用例）；已开源推送（仓库 public、v0.1.3 已发布、
+> 客户端）、电脑玩家都已完成并有测试覆盖（153 个用例）；已开源推送（仓库 public、v0.1.4 已发布、
 > 市场 PR 的两项 check 全绿）。只剩三机实机验收没跑——那需要另外两台真机器。**
 > 具体的完成边界见「进度」一节，不要按 README 的愿景当成已实现的能力。
 
@@ -50,11 +50,11 @@ DeepSeek Harness 的插件：**三人局域网斗地主**。三个人各自在�
 | M5 浮窗 UI `src/client.cjs` | ✅ 完成 | 40 个用例：22 个展示逻辑 + 4 个浏览器半区依赖守卫 + 14 个**跑真实 `lib/client.js`** 的渲染/交互用例；真实 Chrome 走过开房→入座→叫分定地主；真 GUI 里两个槽位 `active`、标签页与浮窗药丸已抓图 |
 | M6 电脑玩家 `src/bot.js` | ✅ 完成 | 16 个用例：**电脑视图字段集被钉死**（多一个字段就红）、四档在全电脑/1人+2电脑/2人+1电脑三种桌上都能打完整局且**一次都没提出非法出法**、强度排序用同牌同座位的配对联赛量出来、`地狱` 的记账能力有构造用例。另有 `scripts/live-bots.mjs` 在**重启后运行中的 DSH 里**用「1 真人 + 2 台地狱电脑」打完一整盘：脚本只发 0 号位的 15 次请求，电脑自己出牌 22 次、叫分 2 次，零保底，54 张齐 |
 | M7 三机实机验收 | ⬜ 未开始 | 步骤见下面「三机实机怎么跑」；本机的传输路径已通，缺的是另外两台真机器 |
-| M8 开源推送 | ✅ 完成 | <https://github.com/dingchenhui0618-arch/dsh-doudizhu>（public，v0.1.3 已发布）；市场 PR [#7526](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7526) 的 Submission gate 与 check **全绿**，等维护者合并 |
+| M8 开源推送 | ✅ 完成 | <https://github.com/dingchenhui0618-arch/dsh-doudizhu>（public，v0.1.4 已发布）；市场 PR [#7526](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7526) 的 Submission gate 与 check **全绿**，等维护者合并 |
 
-当前 `node --test "test/*.test.mjs"`：**144 个用例全部通过**（约 8 秒）。
+当前 `node --test "test/*.test.mjs"`：**153 个用例全部通过**（约 9 秒）。
 规则 18、出法枚举 8、牌局 18、房间 17、传输 12、插件 host 12、半区契约 3、展示逻辑 22、
-客户端依赖 4、客户端渲染 14、电脑玩家 16。
+客户端依赖 4、客户端渲染 14、电脑玩家 16、主题 token 9。
 
 ### 还没验证的（别当成已经好了）
 
@@ -66,7 +66,8 @@ DeepSeek Harness 的插件：**三人局域网斗地主**。三个人各自在�
   补齐、撤下、局中禁用），不是肉眼看屏幕点的。
 - **三机实机、防火墙、以及"另外两家真的在别的电脑上"**：一步都没跑，M7 的事。
   目前 follower 路径是用 Node 客户端经本机局域网地址验证的，那是真实传输但不是真实浏览器。
-- 深浅色主题下的对比度只在深色下看过。
+- **浅色主题没在真 GUI 里看过。** 但它在夹具里**用真实 token 渲染过**：开房按钮与选中项
+  的对比度实测 18.9:1，面板 15.97:1。真 GUI 里我只在深色主题下看过（用户那套主题）。
 
 ### 让它出现在 GUI 里（实测：不用重启）
 
@@ -133,6 +134,19 @@ plugin_manager set_plugin  include:dsh-doudizhu  enabled=true    -> application:
   `Number(undefined)` 才是 NaN）看着正常，所以只在第二次加载才暴露。
 - **浮窗按固定高度定位，20 张牌时底部被顶出屏幕。** 窗口真实高度随内容变化（样式表上限 78vh），
   而 `clampPosition` 用的是常量 `MINI_H`。现在先量真实盒子再夹取。
+
+**夹具曾经骗了我一次，这也是它的第三个 bug（v0.1.4）。** 上面那套流程跑起来时，夹具页里
+一个 `--dsw-…` 变量都没有，所有颜色都落到插件自带的暗色兜底上——于是「暗色主题把品牌色设成
+近白」这件事在夹具里**物理上不可能出现**，我看到的是一颗漂亮的蓝按钮，而用户在真窗口里看到
+的是白框。现在夹具会从**已安装的 DSH** 里读出真实 token（`scripts/dsh-theme.mjs`）并注入，
+`--theme dark|light|none` 选哪套，页顶还会写明注入了什么：
+
+```sh
+node scripts/browser-harness.mjs --port 8792 --theme dark    # 复现用户的暗色主题
+```
+
+改完之后，同一处元素的**实测对比度是 1.05:1 → 18.08:1（暗色）/ 18.9:1（浅色）**——
+这个数字是用 `getComputedStyle` 从真实 DOM 上读出来的，不是看图的印象。
 
 ### 已验的安全性质
 
@@ -304,7 +318,7 @@ DSH 自己的 Web 认证**不覆盖插件用 `ctx.webServer.register` 挂的 pre
 （所以这个仓库的 `.gitignore` 故意**不**忽略 `lib/`）。把这一行地址交给 DSH 的插件管理器：
 
 ```
-https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.1.3/dsh-doudizhu-0.1.3.tgz
+https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.1.4/dsh-doudizhu-0.1.4.tgz
 ```
 
 三条路都通向同一个动作，挑顺手的：
@@ -319,6 +333,9 @@ https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.1.3/ds
 > **v0.1.3 有个例外要说清**：这一版改了**宿主半区**（电脑玩家住在权威那台机器里，
 > 代码在 `src/room.js` / `src/net.js`）。切插件只能换客户端半区，换不掉宿主半区，
 > 所以**这一版要让 DSH 重启一次**才能用上电脑玩家。只玩纯真人对局的话，切插件就够了。
+>
+> **v0.1.4 不用重启**：它只改了客户端半区的样式（浮窗里两个按钮的白字）与夹具/测试，
+> 宿主半区一行没动，所以**关掉插件再打开一次**就能看到修好的样子。
 
 ### 这条路径我验到什么程度
 
@@ -423,11 +440,16 @@ netsh advfirewall firewall delete rule name="dsh-doudizhu 8791"
 ## 开发
 
 ```sh
-node --test "test/*.test.mjs"     # 144 个单测：规则 / 出法枚举 / 牌局 / 房间 / 传输 / 插件 / 展示逻辑 / 电脑玩家 / 客户端
+node --test "test/*.test.mjs"     # 153 个单测：规则 / 出法枚举 / 牌局 / 房间 / 传输 / 插件 / 展示逻辑 / 电脑玩家 / 主题 token / 客户端
 node scripts/build.mjs            # esbuild 打包：src/host.js -> lib/index.js，src/client.cjs -> lib/client.js
 node scripts/live-check.mjs       # 对着运行中的 DSH 实机跑一盘（三真人，host 半区端到端）
 node scripts/live-bots.mjs        # 对着运行中的 DSH 实机跑一盘（1 真人 + 2 台电脑）
+node scripts/dsh-theme.mjs        # 打印已安装 DSH 的主题 token 真实值（夹具和测试都用它）
 ```
+
+改样式时别忘了这条：**颜色只从 `--dsw-alias-*` 拿，绝不在品牌色底上写 `color:#fff`。**
+暗色主题的品牌色是近白（`#f9fafb`），白字在它上面等于隐形——v0.1.4 修的就是这个，
+`test/theme.test.mjs` 里有一条结构守卫会把它当场逮住。
 
 在真实浏览器里看浮窗（`scripts/browser-harness.mjs`）：它需要一个本机运行的 DSH，先把两个
 React UMD 构建放进 `_tmp/`，再把夹具起在回环端口上，然后用浏览器打开它。
@@ -435,8 +457,12 @@ React UMD 构建放进 `_tmp/`，再把夹具起在回环端口上，然后用�
 ```sh
 curl.exe -s -o _tmp/react.js     https://unpkg.com/react@18.3.1/umd/react.production.min.js
 curl.exe -s -o _tmp/react-dom.js https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js
-node scripts/browser-harness.mjs --port 8792   # 然后打开 http://127.0.0.1:8792/
+node scripts/browser-harness.mjs --port 8792 --theme dark   # 然后打开 http://127.0.0.1:8792/
 ```
+
+`--theme dark|light|none` 决定往页面里注入哪套 **DSH 真实主题 token**（默认 dark，读自已安装的
+应用）。不注入就等于在"插件自带的暗色兜底"上验样式——v0.1.4 的 bug 就是这么漏过去的，
+所以除非你明确知道自己在干什么，别用 `none`。
 
 夹具里的「开房」会真的在运行中的插件上建房，所以看完记得回插件里散局。
 
