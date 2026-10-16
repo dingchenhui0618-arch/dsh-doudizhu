@@ -21,6 +21,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test \"test/*.test.mjs\"",
+    "prepush": "node scripts/pre-push-check.mjs",
     "prepack": "node scripts/build.mjs"
   },
   "devDependencies": {

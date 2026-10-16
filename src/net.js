@@ -35,8 +35,8 @@ const MAX_BODY = 64 * 1024
 /**
  * Interface names that are virtual / host-only. Another person's machine can
  * never route to them, but they are real sockets on real private ranges — which
- * is exactly why they are dangerous to hand out: `172.22.80.1` (the WSL
- * vEthernet) looks just like a LAN address and always fails from the other
+ * is exactly why they are dangerous to hand out: a WSL `vEthernet` address such
+ * as `172.22.0.1` looks just like a LAN address and always fails from the other
  * machine. We keep them in `lanCandidates` so the UI can say what it hid; we
  * just never offer one as *the* address to type.
  */
