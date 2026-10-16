@@ -5,7 +5,8 @@ DeepSeek Harness 的插件：**三人局域网斗地主**。三个人各自在�
 （简单 / 中等 / 困难 / 地狱）随时可换，一个人或两个人照样能打完整一局。
 
 > **当前进度：规则引擎、牌局状态机、权威房间服务与传输、DSH 插件两个半区（host + 浮窗/标签页
-> 客户端）、电脑玩家都已完成并有测试覆盖（144 个用例）；三机实机验收与开源推送尚未开始。**
+> 客户端）、电脑玩家都已完成并有测试覆盖（144 个用例）；已开源推送（仓库 public、v0.1.3 已发布、
+> 市场 PR 的两项 check 全绿）。只剩三机实机验收没跑——那需要另外两台真机器。**
 > 具体的完成边界见「进度」一节，不要按 README 的愿景当成已实现的能力。
 
 ## 规则口径
@@ -387,6 +388,10 @@ netsh advfirewall firewall delete rule name="dsh-doudizhu 8791"
 边界是分开的：切插件能换客户端半区，**换不掉宿主半区**（切完 `/state` 里缺的仍是新宿主
 字段），宿主半区的改动要重启 DSH 才生效。这个 bug 的修复在客户端，所以切一次就够。
 
+**v0.1.3 是例外**：电脑玩家住在宿主半区（权威那台机器里跑策略），所以它要**重启一次** DSH
+才出现。判据：重启后浮窗牌桌页会出现「电脑」那一栏（四个强度按钮 + 「用电脑补齐空位」）；
+看不到这一栏就是宿主半区还是旧的。纯三人真人对局不受影响。
+
 其余按顺序排，别一次改三样：
 
 1. **地址是不是虚拟网卡的。** 主机装了 WSL / Docker / 虚拟机 / VPN 时，
@@ -418,9 +423,10 @@ netsh advfirewall firewall delete rule name="dsh-doudizhu 8791"
 ## 开发
 
 ```sh
-node --test "test/*.test.mjs"     # 112 个单测：规则 / 牌局 / 房间 / 传输 / 插件 / 展示逻辑 / 客户端
+node --test "test/*.test.mjs"     # 144 个单测：规则 / 出法枚举 / 牌局 / 房间 / 传输 / 插件 / 展示逻辑 / 电脑玩家 / 客户端
 node scripts/build.mjs            # esbuild 打包：src/host.js -> lib/index.js，src/client.cjs -> lib/client.js
-node scripts/live-check.mjs       # 对着运行中的 DSH 实机跑一盘（host 半区端到端）
+node scripts/live-check.mjs       # 对着运行中的 DSH 实机跑一盘（三真人，host 半区端到端）
+node scripts/live-bots.mjs        # 对着运行中的 DSH 实机跑一盘（1 真人 + 2 台电脑）
 ```
 
 在真实浏览器里看浮窗（`scripts/browser-harness.mjs`）：它需要一个本机运行的 DSH，先把两个
