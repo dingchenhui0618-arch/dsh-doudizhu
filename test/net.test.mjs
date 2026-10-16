@@ -14,7 +14,13 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { PHASES, bidSeat, checkPlay } from '../src/game.js'
-import { createAuthorityServer, createFollowerLink, lanAddresses } from '../src/net.js'
+import {
+  createAuthorityServer,
+  createFollowerLink,
+  isVirtualIface,
+  lanAddresses,
+  rankLanCandidates,
+} from '../src/net.js'
 import { createRoom } from '../src/room.js'
 import { SEAT_COUNT, deckIds } from '../src/rules.js'
 import { seedRandom } from '../src/rng.js'
@@ -306,24 +312,59 @@ test('a separate OS process can join and still sees no foreign hand', async (t) 
   assert.equal(room.game.phase, PHASES.BIDDING)
 })
 
+test('virtual adapters are ranked last and never offered as the address to type', () => {
+  const interfaces = {
+    WLAN: [{ family: 'IPv4', address: '192.168.1.50', internal: false }],
+    'vEthernet (WSL (Hyper-V firewall))': [{ family: 'IPv4', address: '172.22.0.1', internal: false }],
+    'Loopback Pseudo-Interface 1': [{ family: 'IPv4', address: '127.0.0.1', internal: true }],
+    Ethernet: [
+      { family: 'IPv4', address: '169.254.10.20', internal: false },
+      { family: 'IPv6', address: 'fe80::1', internal: false },
+    ],
+  }
+  assert.equal(isVirtualIface('WLAN'), false)
+  assert.equal(isVirtualIface('Ethernet'), false)
+  assert.equal(isVirtualIface('vEthernet (WSL (Hyper-V firewall))'), true)
+  assert.equal(isVirtualIface('VirtualBox Host-Only Network'), true)
+  assert.equal(isVirtualIface('Docker Desktop'), true)
+  assert.equal(isVirtualIface(undefined), false)
+
+  // 172.22.0.1 is real and looks like a LAN address, so it stays in the list —
+  // but behind the real adapter, which is what stops the coin flip.
+  assert.deepEqual(rankLanCandidates(interfaces), [
+    { address: '192.168.1.50', iface: 'WLAN', virtual: false },
+    { address: '172.22.0.1', iface: 'vEthernet (WSL (Hyper-V firewall))', virtual: true },
+  ])
+  // Loopback is internal and 169.254.x is link-local: neither is offered at all.
+  assert.deepEqual(rankLanCandidates(interfaces).map((entry) => entry.address), ['192.168.1.50', '172.22.0.1'])
+  assert.deepEqual(rankLanCandidates({}), [])
+  assert.deepEqual(rankLanCandidates(), [])
+})
+
 test('binding 0.0.0.0 makes the authority reachable on the LAN address', async (t) => {
-  const addresses = lanAddresses()
+  const candidates = lanAddresses()
   const room = createRoom({ code: CODE, rng: seedRandom(3) })
   const authority = await createAuthorityServer(room, { host: '0.0.0.0', port: 0, pollTimeoutMs: 100 })
   t.after(() => authority.close())
 
+  // Every candidate is reported so the UI can name what it hid; only the real
+  // adapters become the address we ask a human to type.
+  assert.deepEqual(
+    authority.lanCandidates.map((entry) => entry.url),
+    candidates.map((entry) => `http://${entry.address}:${authority.port}`),
+  )
   assert.deepEqual(
     authority.lanUrls,
-    addresses.map((address) => `http://${address}:${authority.port}`),
+    candidates.filter((entry) => !entry.virtual).map((entry) => `http://${entry.address}:${authority.port}`),
   )
   const local = await getJson(`${authority.loopbackUrl}/hello`)
   assert.equal(local.data.ok, true)
 
-  if (!addresses.length) {
+  if (!candidates.length) {
     t.diagnostic('本机没有局域网 IPv4 地址，跳过程序化局域网访问')
     return
   }
-  const remote = await getJson(`http://${addresses[0]}:${authority.port}/hello`)
+  const remote = await getJson(`http://${candidates[0].address}:${authority.port}/hello`)
   assert.equal(remote.status, 200)
   assert.equal(remote.data.code, CODE)
 })

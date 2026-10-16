@@ -7,6 +7,15 @@
 
 ### 修复
 
+- **分享出去的是一个连不上的地址。** `lanAddresses()` 用 `Object.values(networkInterfaces())`
+  丢掉了网卡名，所以分不清真网卡和虚拟网卡，把 WSL 的 `vEthernet` 地址（`172.22.0.1`）
+  和真实 WLAN 地址并列成 `地址 192.168.1.50:8791 或 172.22.0.1:8791` 一起发给别人——
+  一半概率抄到那个永远连不上的。本机实测同事拿到的就是这个地址。
+  现在改成：保留网卡名、虚拟网卡排到最后、**只把真实网卡的地址放进分享那一行**，
+  被隐藏的虚拟网卡在 UI 里用一行小字说明是哪一个（新增 `lanCandidates`、
+  `rankLanCandidates`、`isVirtualIface`、`lanChips`、`hiddenLanCandidates`）。
+  顺带修掉同一类陷阱：`127.0.0.1` 原来也在可复制列表里，发给别人等于让他连他自己，
+  现在那一项标了「（本机）」。
 - **`scripts/live-check.mjs` 的压牌分支是死代码。** 它读 `move.shape` / `move.length`，
   而 `classifyMove` 从来没返回过这两个字段（返回的是 `type` / `size` / `mainValue`），
   于是除了第一次领出，之后每一步都走 `pass`。牌局照样能结束——谁领出谁一路领完——

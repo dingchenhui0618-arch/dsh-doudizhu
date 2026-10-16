@@ -34,6 +34,8 @@ import {
   seatName,
   selectionSummary,
   shareText,
+  lanChips,
+  hiddenLanCandidates,
   statusLine,
   suitSymbol,
   toggleSelection,
@@ -260,6 +262,40 @@ test('the share text carries the room code and every LAN address', () => {
     shareText({ code: 'ABC234', lanUrls: [], loopbackUrl: 'http://127.0.0.1:8791' }),
     '房间码 ABC234 · 地址 127.0.0.1:8791',
   )
+})
+
+test('only real adapters become copy chips, virtual ones are reported as hidden', () => {
+  const authority = {
+    code: 'ABC234',
+    lanUrls: ['http://192.168.1.50:8791'],
+    lanCandidates: [
+      { url: 'http://192.168.1.50:8791', iface: 'WLAN', virtual: false },
+      { url: 'http://172.22.0.1:8791', iface: 'vEthernet (WSL (Hyper-V firewall))', virtual: true },
+    ],
+  }
+  assert.deepEqual(lanChips(authority), [
+    { key: 'http://192.168.1.50:8791', url: 'http://192.168.1.50:8791', iface: 'WLAN' },
+  ], 'the WSL address must not be offered next to the real one')
+  assert.deepEqual(hiddenLanCandidates(authority), [
+    { url: 'http://172.22.0.1:8791', iface: 'vEthernet (WSL (Hyper-V firewall))', virtual: true },
+  ])
+
+  // State from an older build carries lanUrls only; it must keep working.
+  assert.deepEqual(lanChips({ lanUrls: ['http://192.168.1.7:8791'] }), [
+    { key: 'http://192.168.1.7:8791', url: 'http://192.168.1.7:8791', iface: '' },
+  ])
+  assert.deepEqual(lanChips({}), [])
+  assert.deepEqual(hiddenLanCandidates(null), [])
+
+  // Every adapter virtual: net.js falls back to offering them, so the chips must
+  // fall back too rather than showing an empty list.
+  const allVirtual = {
+    lanUrls: ['http://172.22.0.1:8791'],
+    lanCandidates: [{ url: 'http://172.22.0.1:8791', iface: 'vEthernet (WSL)', virtual: true }],
+  }
+  assert.deepEqual(lanChips(allVirtual), [
+    { key: 'http://172.22.0.1:8791', url: 'http://172.22.0.1:8791', iface: '' },
+  ], 'nothing real to prefer: better the virtual one than nothing')
 })
 
 test('an address box value becomes something fetch accepts', () => {

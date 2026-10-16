@@ -227,6 +227,25 @@ export function playEntries(snapshot) {
 }
 
 /**
+ * Which addresses to show as one-tap copy chips. Real adapters only: a virtual
+ * adapter listed next to a real one turns "which address do I send?" into a coin
+ * flip, and the virtual one always loses.
+ */
+export function lanChips(authority) {
+  const candidates = Array.isArray(authority?.lanCandidates) ? authority.lanCandidates : []
+  const real = candidates.filter((entry) => entry && entry.url && !entry.virtual)
+  if (real.length) return real.map((entry) => ({ key: entry.url, url: entry.url, iface: entry.iface || '' }))
+  const urls = Array.isArray(authority?.lanUrls) ? authority.lanUrls : []
+  return urls.map((url) => ({ key: url, url, iface: '' }))
+}
+
+/** The virtual adapters deliberately kept out of `lanChips`, for the "hid these" note. */
+export function hiddenLanCandidates(authority) {
+  const candidates = Array.isArray(authority?.lanCandidates) ? authority.lanCandidates : []
+  return candidates.filter((entry) => entry && entry.url && entry.virtual)
+}
+
+/**
  * What a person types into the address box, turned into something fetch accepts.
  * Nobody should have to remember the scheme, and a trailing slash makes the
  * authority's own routing think it got an empty path.

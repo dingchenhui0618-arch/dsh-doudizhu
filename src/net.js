@@ -32,12 +32,48 @@ import {
 const TOKEN_HEADER = 'x-ddz-token'
 const MAX_BODY = 64 * 1024
 
-/** Non-loopback IPv4 addresses, for the "share this address" panel. */
+/**
+ * Interface names that are virtual / host-only. Another person's machine can
+ * never route to them, but they are real sockets on real private ranges — which
+ * is exactly why they are dangerous to hand out: `172.22.80.1` (the WSL
+ * vEthernet) looks just like a LAN address and always fails from the other
+ * machine. We keep them in `lanCandidates` so the UI can say what it hid; we
+ * just never offer one as *the* address to type.
+ */
+const VIRTUAL_IFACE_HINTS = [
+  'vethernet', 'wsl', 'hyper-v', 'docker', 'vmware', 'virtualbox', 'vbox',
+  'loopback', 'bluetooth', 'tailscale', 'zerotier', 'npcap', 'radmin',
+  'hamachi', 'openvpn', 'wireguard', 'tap-', 'tun', 'container', 'bridge',
+]
+
+export function isVirtualIface(name) {
+  const lower = String(name ?? '').toLowerCase()
+  return VIRTUAL_IFACE_HINTS.some((hint) => lower.includes(hint))
+}
+
+/**
+ * Rank this machine's non-loopback IPv4 addresses for handing to other players:
+ * real adapters first, virtual adapters last. Pure — it takes the shape
+ * `os.networkInterfaces()` returns — so the ranking is testable without the real
+ * `os`.
+ */
+export function rankLanCandidates(interfaces = {}) {
+  const out = []
+  for (const [iface, entries] of Object.entries(interfaces ?? {})) {
+    for (const entry of entries ?? []) {
+      if (!entry || entry.family !== 'IPv4' || entry.internal) continue
+      const address = String(entry.address ?? '')
+      if (!address || address.startsWith('169.254.')) continue
+      out.push({ address, iface, virtual: isVirtualIface(iface) })
+    }
+  }
+  return out.sort((a, b) =>
+    a.virtual === b.virtual ? a.address.localeCompare(b.address) : a.virtual ? 1 : -1)
+}
+
+/** Non-loopback IPv4 addresses, best-for-sharing first. */
 export function lanAddresses() {
-  return Object.values(networkInterfaces())
-    .flat()
-    .filter((entry) => entry && entry.family === 'IPv4' && !entry.internal)
-    .map((entry) => entry.address)
+  return rankLanCandidates(networkInterfaces())
 }
 
 function readBody(req, limit = MAX_BODY) {
@@ -125,6 +161,11 @@ export async function createAuthorityServer(room, { host = '0.0.0.0', port = 879
       server.removeListener('error', reject)
       const bound = server.address()
       const actual = typeof bound === 'object' && bound ? bound.port : port
+      const candidates = lanAddresses()
+      const real = candidates.filter((entry) => !entry.virtual)
+      // If every adapter is virtual there is nothing honest to prefer, so fall
+      // back to offering them rather than handing out an unreachable loopback.
+      const shareable = real.length ? real : candidates
       resolve({
         server,
         room,
@@ -133,7 +174,12 @@ export async function createAuthorityServer(room, { host = '0.0.0.0', port = 879
         code: room.code,
         url: `http://${host}:${actual}`,
         loopbackUrl: `http://127.0.0.1:${actual}`,
-        lanUrls: lanAddresses().map((address) => `http://${address}:${actual}`),
+        lanUrls: shareable.map((entry) => `http://${entry.address}:${actual}`),
+        lanCandidates: candidates.map((entry) => ({
+          url: `http://${entry.address}:${actual}`,
+          iface: entry.iface,
+          virtual: entry.virtual,
+        })),
         address: bound,
         close: () => closeAuthority(server, room),
       })

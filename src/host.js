@@ -207,6 +207,7 @@ export function apply(ctx, config) {
               port: current.authority.port,
               loopbackUrl: current.authority.loopbackUrl,
               lanUrls: [...current.authority.lanUrls],
+              lanCandidates: (current.authority.lanCandidates || []).map((entry) => ({ ...entry })),
             }
           : null,
       guest:

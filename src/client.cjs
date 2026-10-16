@@ -365,17 +365,37 @@ function ShareBlock(props) {
   const authority = props.state.authority
   if (!authority) return null
   const text = UI.shareText(authority)
-  const urls = (authority.lanUrls || []).concat(authority.loopbackUrl ? [authority.loopbackUrl] : [])
+  const chips = UI.lanChips(authority)
+  const hidden = UI.hiddenLanCandidates(authority)
+  function bare(url) { return String(url).replace(/^https?:\/\//, '') }
   return h('div', { className: 'ddz-col' },
     h('div', { className: 'ddz-row' },
       h('span', { className: 'ddz-label' }, '房间码'),
       h('span', { className: 'ddz-code' }, authority.code),
     ),
-    h('div', { className: 'ddz-urls' }, urls.map(function (url) {
-      return h('code', { key: url, title: '点击复制', onClick: function () { copy(url.replace(/^https?:\/\//, '')) } },
-        url.replace(/^https?:\/\//, ''))
-    })),
+    h('div', { className: 'ddz-urls' },
+      chips.map(function (chip) {
+        return h('code', {
+          key: chip.key,
+          title: (chip.iface ? '网卡 ' + chip.iface + ' · ' : '') + '点击复制',
+          onClick: function () { copy(bare(chip.url)) },
+        }, bare(chip.url))
+      }).concat(authority.loopbackUrl
+        // Shown, but labelled: handing 127.0.0.1 to someone else points at
+        // *their* machine, which is the same trap as a virtual adapter.
+        ? [h('code', {
+            key: 'loopback',
+            title: '本机回环地址，只有这台电脑能用 · 点击复制（复制的是纯地址）',
+            onClick: function () { copy(bare(authority.loopbackUrl)) },
+          }, bare(authority.loopbackUrl) + '（本机）')]
+        : []),
+    ),
     h('div', { className: 'ddz-share', title: '点击复制', onClick: function () { copy(text) } }, text),
+    hidden.length
+      ? h('div', { className: 'ddz-note' },
+          '已隐藏 ' + hidden.length + ' 个虚拟网卡地址（' + hidden.map(function (entry) { return entry.iface }).join('、') +
+          '）—— 那是 WSL / 虚拟机 / VPN 的网卡，别的电脑连不上。')
+      : null,
     h('div', { className: 'ddz-note' }, '把上面这一行发给另外两家，他们在自己的浮窗里填地址和房间码。'),
   )
 }
