@@ -1,9 +1,17 @@
 {
   "name": "dsh-doudizhu",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Three-player LAN Doudizhu (斗地主) for DeepSeek Harness: one authority host plus two followers, each playing from the plugin's floating window, with four levels of computer player filling any empty seat.",
   "type": "module",
   "main": "lib/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dingchenhui0618-arch/dsh-doudizhu.git"
+  },
+  "homepage": "https://github.com/dingchenhui0618-arch/dsh-doudizhu#readme",
+  "bugs": {
+    "url": "https://github.com/dingchenhui0618-arch/dsh-doudizhu/issues"
+  },
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",

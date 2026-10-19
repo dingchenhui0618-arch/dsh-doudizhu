@@ -5,6 +5,32 @@
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-10-19
+
+### 发布流水线：`node scripts/release.mjs`
+
+0.1.4 与 0.1.5 都是手工发的：build → pack → tag → push → `gh release` → 市场条目。六步里
+每一步都能判定「做了没做」，但每次都要人肉核对（三处 sha256、市场条目有没有跟着换版本）。
+这一版把它收进一个脚本：八步、幂等、可 `--dry-run`，被外部条件卡住时**标 BLOCKED 而不是假装成功**。
+
+| 步骤 | 做什么 | 怎么判定做完 |
+| --- | --- | --- |
+| preflight | 版本 / 分支 / 工作区 / CHANGELOG / 单测 / pre-push | 任何一项不过就停，不发一个红的版 |
+| build | 重建 `lib/` | esbuild 输出 |
+| pack | `npm pack` + sha256 | 包内 `package.json` 版本 == 目标版本 |
+| npm | `npm publish` | `npm view <name>@<ver>` 查得到；包名被占时提示改用 scope 名 |
+| git | 打 tag、推 main 与 tag | `git ls-remote` 查得到 tag |
+| release | `gh release create`，notes 由 CHANGELOG 那一节生成 | asset 的 digest == 本地 sha256 |
+| market | 市场条目换 tarball + 用例数，开 PR 或就地更新已有 PR | 条目指着这一版 |
+| verify | 三处 sha256 比对（本地 / asset / 下载回来的） | 三处一致 |
+
+### 其它
+
+- `package.json` 补上 `repository` / `homepage` / `bugs`。这不是好看：市场用 `probe-npm.mjs`
+  把仓库和 npm 包对上，靠的正是**发布出去的包里 `repository` 指回同一个 GitHub 仓库**
+  （防的是抢注同名包）——不写，npm 上发了也不会被市场认领。
+- README 增加「发布」一节：一条命令、每步的验收信号、npm 卡住时怎么办。
+
 ## [0.1.5] - 2026-10-19
 
 ### 修复：浮窗拖一下就会自己展开

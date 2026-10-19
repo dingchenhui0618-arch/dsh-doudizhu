@@ -540,6 +540,42 @@ node scripts/live-bots.mjs --level hell          # 1 真人 + 2 台地狱电脑
 & "$env:USERPROFILE\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe" --test "test/*.test.mjs"
 ```
 
+## 发布（维护者用）
+
+```sh
+node scripts/release.mjs --dry-run     # 先看它打算做什么，一个字节都不改
+node scripts/release.mjs --market      # 真发：npm + tag/push + GitHub Release + 市场条目 PR
+```
+
+八步、幂等、每步都有验收信号：
+
+| 步骤 | 做什么 | 怎么判定做完 |
+| --- | --- | --- |
+| preflight | 版本 / 分支 / 工作区 / CHANGELOG / 单测 / pre-push 三步 | 任何一项不过就停 |
+| build | 重建 `lib/` | esbuild 的输出 |
+| pack | `npm pack` + sha256 | 包内 `package.json` 的版本 == 目标版本 |
+| npm | `npm publish --access public` | `npm view <name>@<ver>` 查得到 |
+| git | 打 tag、推 main 与 tag | `git ls-remote` 查得到 tag |
+| release | `gh release create`，notes 由 CHANGELOG 那一节生成 | asset 的 digest == 本地 sha256 |
+| market | 市场条目换 tarball 与用例数；有同分支 PR 就地更新，否则从 main 起新分支开 PR | 条目指着这一版 |
+| verify | 三处 sha256 比对（本地 / asset / 下载回来的包） | 三处一致 |
+
+**被外部条件卡住时它标 `⛔ BLOCKED` 并返回退出码 2**（`0` 全绿、`1` 有步骤失败），
+不会把没做成的事写成做成了。目前唯一会让它返回 2 的是 npm 登录态：
+
+```sh
+npm login                                  # 或把带 publish 权限的 granular token 写进 ~/.npmrc
+node scripts/release.mjs                   # 再跑一次：npm 那步补上，已完成的两步自动跳过
+```
+
+> **npm 上的 `dsh-doudizhu` 现在归 `awesomehou`**（2026-08-18 用 `0.0.0` 占位包占的，
+> 描述写着"Will be replaced by the real package"）。脚本发布前会查维护者：不是你的账号
+> 就不硬发（必然 403），而是提示改用 scope 名——
+> `node scripts/release.mjs --npm-name @<你的 npm 账号>/dsh-doudizhu`。
+> 市场条目的 `tarball` 必须留在 GitHub Release（市场只收 GitHub 托管的 tarball），
+> npm 只是第二条安装通道：市场的 `probe-npm.mjs` 靠**包里的 `repository` 字段**指回同一个
+> 仓库才会认领它，所以 `package.json` 里那几个字段不是装饰。
+
 ## 许可
 
 MIT。规则层移植自 [Aevi 家庭斗地主](https://github.com/AurexloveU/doudizhu)（MIT，
