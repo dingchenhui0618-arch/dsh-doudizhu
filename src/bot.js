@@ -20,8 +20,12 @@
  * | farmer never overtakes a nearly-out partner  |  –   |   ✓    |  ✓   |  ✓   |
  * | any beat (even a bomb) to stop someone going |  –   |   ✓    |  ✓   |  ✓   |
  * | leads by fewest remaining turns              |  –   |   –    |  ✓   |  ✓   |
- * | leads big to block a one-card opponent       |  –   |   –    |  ✓   |  ✓   |
+ * | leads without spending its 2s / jokers       |  –   |   –    |  ✓   |  ✓   |
+ * | follows without breaking its own groups      |  –   |   –    |  ✓   |  ✓   |
  * | counts cards: unbeatable plays, run-out line |  –   |   –    |  –   |  ✓   |
+ *
+ * 叫分不在上表里：它是一张按手牌的强度分档的表（`BID_TABLES`），见那张表上的
+ * 测量说明。它不是「更会打牌」，但在本引擎里是最大的一档强度差。
  *
  * An earlier version scored every candidate on one linear scale with weights I
  * had guessed. It measured *worse* than the level below it, because the weights
@@ -85,16 +89,27 @@ export const DANGER_AT = {
 /**
  * Bidding thresholds by level, as `[bid 1, bid 2, bid 3]` on `bidPower`.
  * A lower table is a more aggressive bidder. This is a real strength lever: in
- * this game the landlord wins most hands, so becoming the landlord with a hand
- * worth it is worth points, and it is the one decision a level makes before
- * seeing anybody play. The numbers here are what `scripts/bot-league.mjs`
- * measures; two fancier play rules were deleted for measuring worse.
+ * this game the landlord side wins most hands, so the auction is the one decision
+ * a level makes before anybody plays, and it moves the league more than any single
+ * play rule. The numbers here are what `scripts/bot-league.mjs` measures; two
+ * fancier play rules were deleted for measuring worse.
+ *
+ * 依据：另做过一组测量（强制每手都叫 3、按起手 17 张的 bidPower 分六档，每档约
+ * 117 手），地主胜率是 56.0% / 72.6% / 76.1% / 79.3% / 84.6% / 96.6%，而同一张
+ * 桌上的农民一方只有三成上下。这个引擎里「抢到地主」本身就值二十多个百分点，所以
+ * 难度越高越敢叫，四档的差距主要来自这张表。
+ *
+ * 为什么不给地狱再低的门槛：`[2, 5, 8]` 试过，联赛 70.7%（180 seeds），但它等于
+ * 「几乎每手都叫 3」——地狱当上地主的比例从 45% 跳到 84%，人再想坐庄就没机会了，
+ * 电脑还会拿着烂牌乱叫。`[5, 9, 13]` 只少 5.5pp（65.2%），地主率回到 60%，是这条
+ * 曲线上的膝点。这个「赢面 vs 还能不能像一盘牌」的取舍是产品决定，写在 README 里，
+ * 不是测量结论。
  */
 export const BID_TABLES = {
   easy: [18, 12, 12],
   medium: [9, 13, 18],
-  hard: [8, 12, 16],
-  hell: [7, 11, 15],
+  hard: [7, 11, 15],
+  hell: [5, 9, 13],
 }
 
 function play(cardIds) {
@@ -213,6 +228,21 @@ function pickIndex(list, rand) {
 }
 
 /**
+ * The cheapest beat that does not break up the rest of the hand.
+ *
+ * 同样是「能压住」，用一张 6 拆掉手里的一对 6，会让剩下的牌凭空多出一个回合；
+ * 按压完之后的回合数排序，再按点数取最小，电脑就不会为了省一张小牌把牌型拆散。
+ * 只给困难/地狱用：中等保持原来的「能压就压」，四档才有差别。
+ */
+function cheapestWithoutBreaking(handIds, moves) {
+  return [...moves].sort(
+    (left, right) =>
+      movesToEmpty(removeCards(handIds, left.cardIds)) - movesToEmpty(removeCards(handIds, right.cardIds)) ||
+      left.move.mainValue - right.move.mainValue,
+  )[0]
+}
+
+/**
  * Cards this hand can shed without ever giving up the lead: repeatedly take the
  * biggest group that no outstanding card can beat. This is how a strong player
  * closes a hand out, and it is the one thing `hell` does that `hard` does not.
@@ -254,7 +284,10 @@ function choosePlay(view, rand) {
   // 2. Somebody is about to go out. Stopping that is worth a bomb; it is not worth
   //    saving one.
   if (danger.length) {
-    const stopper = cheapest(plain.length ? plain : moves)
+    const stopper =
+      view.difficulty === 'medium'
+        ? cheapest(plain.length ? plain : moves)
+        : cheapestWithoutBreaking(view.hand, plain.length ? plain : moves)
     if (view.difficulty === 'hell') {
       // 地狱 checks whether the cheap beat *actually* stops them. If a card
       // somebody still holds can beat it, the landlord simply plays again next
@@ -281,7 +314,10 @@ function choosePlay(view, rand) {
   if (view.target) {
     // The cheapest card that beats the table, and never a bomb while a plain beat
     // exists — a rule of its own above is what spends one when it has to.
-    if (plain.length) return play(cheapest(plain).cardIds)
+    if (plain.length) {
+      if (view.difficulty === 'medium') return play(cheapest(plain).cardIds)
+      return play(cheapestWithoutBreaking(view.hand, plain).cardIds)
+    }
     return view.canPass ? PASS : play(cheapest(moves).cardIds)
   }
 
@@ -327,7 +363,9 @@ function chooseLead(view, moves, outstanding) {
     }
   }
 
-  return [...remaining].sort(
+  const safe = view.role === 'landlord' ? remaining.filter((entry) => entry.candidate.move.mainValue < 15) : remaining
+  const pool = safe.length ? safe : remaining
+  return [...pool].sort(
     (left, right) => planOf(left) - planOf(right) || right.candidate.move.size - left.candidate.move.size || left.candidate.move.mainValue - right.candidate.move.mainValue,
   )[0].candidate
 }

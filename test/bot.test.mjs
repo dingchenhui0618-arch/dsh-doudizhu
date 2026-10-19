@@ -20,7 +20,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { BOT_VIEW_KEYS, chooseAction, describeLevel, outstandingFor, runOutLine } from '../src/bot.js'
+import { BID_TABLES, BOT_VIEW_KEYS, bidPower, chooseAction, describeLevel, outstandingFor, runOutLine } from '../src/bot.js'
 import { PHASES } from '../src/game.js'
 import { createAuthorityServer } from '../src/net.js'
 import {
@@ -47,6 +47,34 @@ function cardsOfValue(value, count) {
   return deckIds()
     .filter((id) => cardFromId(id)?.value === value)
     .slice(0, count)
+}
+
+/** A play-phase view with a full table, so one rule can be driven on its own. */
+function playView(overrides = {}) {
+  const hand = overrides.hand ?? []
+  return {
+    difficulty: 'hard',
+    seat: 0,
+    phase: PHASES.PLAYING,
+    role: 'landlord',
+    hand: [...hand],
+    playedIds: [],
+    handCounts: [
+      { seat: 0, count: hand.length, role: 'landlord', isBot: true },
+      { seat: 1, count: 17, role: 'farmer', isBot: true },
+      { seat: 2, count: 17, role: 'farmer', isBot: true },
+    ],
+    landlordSeat: 0,
+    dealerSeat: 0,
+    toAct: 0,
+    target: null,
+    targetSeat: null,
+    passes: 0,
+    canPass: false,
+    bidTurnSeat: null,
+    highestBid: { score: 3, seat: 0 },
+    ...overrides,
+  }
 }
 
 /* ------------------------------------------------------------- the view -- */
@@ -304,12 +332,13 @@ test('the four levels are ordered, measured on the same deals', () => {
     assert.ok(row && row.hands > 0, `${level} 一手都没打`)
     return row.rate
   }
-  // Measured at 60 seeds: 简单 31.1%, 中等 43.9%, 困难 56.7%, 地狱 57.8%.
+  // Measured after the 0.1.5 bot work — 24 seeds (this test): 简单 34.7%, 中等 43.1%,
+  // 困难 62.5%, 地狱 66.7%; 60 seeds (`scripts/bot-league.mjs`): 31.1 / 43.9 / 63.3 / 66.7.
   // The gaps below are half of what was measured, so a real regression trips this
   // and noise does not (the whole run is seeded, so it cannot drift on its own).
   assert.ok(rate('easy') < rate('medium') - 0.05, `简单 ${rate('easy')} 没有明显弱于中等 ${rate('medium')}`)
   assert.ok(rate('medium') < rate('hard') - 0.05, `中等 ${rate('medium')} 没有明显弱于困难 ${rate('hard')}`)
-  assert.ok(rate('hell') >= rate('hard') - 0.03, `地狱 ${rate('hell')} 明显弱于困难 ${rate('hard')}`)
+  assert.ok(rate('hell') > rate('hard'), `地狱 ${rate('hell')} 没有强于困难 ${rate('hard')}`)
   assert.ok(rate('hell') > rate('medium'), `地狱 ${rate('hell')} 不该弱于中等 ${rate('medium')}`)
 })
 
@@ -412,6 +441,94 @@ test('hell closes a hand out on a line nothing can answer', () => {
   const after = removeCards(view.hand, action.cards)
   assert.equal(beatableFromOutstanding(classifyMove(action.cards), outstanding), false, '第一手就被人压得住，就不叫必杀')
   assert.equal(runOutLine(after, outstanding).out, true, '剩下的牌也应该能一路走完')
+})
+
+test('困难/地狱领出时不把 2 和王一把打光，中等照旧', () => {
+  // 四张 2 在手里：旧规则为了少一个回合，会把它们当「四带两对」直接领出去，等于
+  // 把最大的控制牌一次扔掉。困难/地狱改成先走 3-7 的顺子，中等仍然只挑最小的一手。
+  const hand = ['C2', 'C9', 'BJ', 'C4', 'DA', 'S9', 'C3', 'H7', 'D10', 'S5', 'S6', 'C6', 'D8', 'H2', 'D2', 'S2', 'H6']
+  for (const level of ['hard', 'hell']) {
+    const action = chooseAction(playView({ hand, difficulty: level }))
+    assert.equal(action.type, 'play')
+    const move = classifyMove(action.cards)
+    assert.ok(move, '领出的牌必须是合法牌型')
+    assert.deepEqual(
+      [move.type, move.mainValue],
+      ['straight', 10],
+      `${level} 应该先走 3-7，而不是兑现四张 2`,
+    )
+    for (const id of action.cards) assert.ok(cardFromId(id).value < 15, `${id} 是 2 或王，不该领出`)
+  }
+  const medium = chooseAction(playView({ hand, difficulty: 'medium' }))
+  assert.equal(classifyMove(medium.cards).type, 'single', '中等没有这条规则，只会出最小的一张')
+})
+
+test('困难/地狱跟牌时不拆自己的对子，中等只挑最便宜的', () => {
+  // 手上有 JJ 和一张 Q，上家出单 9。中等用一张 J 压，拆掉 JJ 让剩下的手牌多出
+  // 一个回合；困难/地狱改用 Q，保住对子。
+  const hand = ['S3', 'D3', 'S6', 'DJ', 'D4', 'SJ', 'H3', 'CK', 'D5', 'C2', 'SA', 'SQ', 'C4', 'SK']
+  const nine = cardsOfValue(9, 1)[0]
+  const view = (level) =>
+    playView({
+      difficulty: level,
+      hand,
+      playedIds: deckIds().filter((id) => !hand.includes(id) && id !== nine),
+      target: classifyMove([nine]),
+      targetSeat: 1,
+      canPass: true,
+    })
+  assert.equal(classifyMove(chooseAction(view('medium')).cards).mainValue, 11, '中等应该用最便宜的 J')
+  assert.equal(classifyMove(chooseAction(view('hard')).cards).mainValue, 12, '困难应该用 Q，不拆 JJ')
+  assert.equal(classifyMove(chooseAction(view('hell')).cards).mainValue, 12, '地狱应该用 Q，不拆 JJ')
+})
+
+test('同一手牌，越高的档位越敢叫地主', () => {
+  // 叫分是这个引擎里最大的一档强度差（依据见 BID_TABLES 上的测量说明），所以门槛要
+  // 在同一手牌上真的叫出不同的分数——只在表格里写数字不算。
+  //   强度 8 的一手普通牌：简单/中等不叫，困难叫 1 分，地狱也叫 1 分；
+  //   强度 13 的一手好牌：困难叫 2 分，地狱直接叫 3 分。
+  const ordinary = ['CK', 'SQ', 'C3', 'S2', 'HA', 'HQ', 'CJ', 'D6', 'C4', 'D2', 'H9', 'C6', 'D4', 'D3', 'C7', 'C10', 'C5']
+  const strong = ['BJ', 'C10', 'C5', 'C8', 'CK', 'D4', 'D5', 'DJ', 'DK', 'H2', 'H5', 'HJ', 'HK', 'S10', 'SA', 'SJ', 'SK']
+  assert.equal(bidPower(ordinary), 8, '这个夹具的前提是手牌强度 8')
+  assert.equal(bidPower(strong), 13, '这个夹具的前提是手牌强度 13')
+  const bidView = (level, hand) => ({
+    difficulty: level,
+    seat: 0,
+    phase: PHASES.BIDDING,
+    role: null,
+    hand: [...hand],
+    handCounts: [
+      { seat: 0, count: 17, role: null, isBot: true },
+      { seat: 1, count: 17, role: null, isBot: true },
+      { seat: 2, count: 17, role: null, isBot: true },
+    ],
+    playedIds: [],
+    landlordSeat: null,
+    dealerSeat: 0,
+    toAct: null,
+    target: null,
+    targetSeat: null,
+    passes: 0,
+    canPass: false,
+    bidTurnSeat: 0,
+    highestBid: { score: 0, seat: null },
+  })
+  const bidOf = (level, hand) => chooseAction(bidView(level, hand), { rand: () => 0.9 }).score
+  assert.equal(bidOf('easy', ordinary), 0)
+  assert.equal(bidOf('medium', ordinary), 0)
+  assert.equal(bidOf('hard', ordinary), 1)
+  assert.equal(bidOf('hell', ordinary), 1)
+  assert.equal(bidOf('hard', strong), 2, '好牌上困难只叫 2 分')
+  assert.equal(bidOf('hell', strong), 3, '同一手好牌，地狱直接叫 3 分')
+
+  // 地狱不许「每手都叫 3 分」：`[2,5,8]` 试过，联赛 70.7% 但它当上地主 84%，
+  // 人再没机会坐庄，电脑还会拿烂牌乱叫。这条是产品口径，不是测量结论。
+  assert.ok(BID_TABLES.hell[2] >= 12, `地狱的 3 分门槛 ${BID_TABLES.hell[2]} 太低，等于每手都抢地主`)
+  // 门槛必须随难度单调放宽，否则「更敢叫」只是表格里的一串数字。
+  for (const index of [0, 1, 2]) {
+    assert.ok(BID_TABLES.hard[index] <= BID_TABLES.medium[index], `困难第 ${index} 个门槛不比中等低`)
+    assert.ok(BID_TABLES.hell[index] <= BID_TABLES.hard[index], `地狱第 ${index} 个门槛不比困难低`)
+  }
 })
 
 test('the window can tell how many computers a room would still take', () => {

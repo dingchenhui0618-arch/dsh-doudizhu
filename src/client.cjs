@@ -20,6 +20,9 @@ const TOKEN_HEADER = 'x-dsh-doudizhu-token'
 const POLL_MS = 900
 const POLL_MS_QUIET = 2600
 const PILL_W = 148
+// Pointer slop that separates a click from a drag, in CSS pixels. A press that
+// never exceeds it keeps its click; anything beyond is a drag and loses it.
+const DRAG_SLOP = 4
 
 /* ------------------------------------------------------------------ store -- */
 
@@ -714,6 +717,11 @@ function MiniWindow() {
   const [drag, setDrag] = React.useState(null)
   const [box, setBox] = React.useState(null)
   const boxRef = React.useRef(null)
+  // The slim pill is a <button>, and a button that is dragged still fires a click
+  // on release — the pill expands on click, so every drag used to pop the window
+  // open. Remember whether the pointer really moved and let the click swallow
+  // itself once.
+  const movedRef = React.useRef(false)
   const state = view.data
   const snapshot = state && state.snapshot
   const myTurn = useTurn(state)
@@ -757,18 +765,22 @@ function MiniWindow() {
     if (event.button !== 0) return
     const box = boxRef.current ? boxRef.current.getBoundingClientRect() : null
     if (!box) return
+    movedRef.current = false
     try { event.currentTarget.setPointerCapture(event.pointerId) } catch (error) { /* older engines */ }
     setDrag({ x: event.clientX, y: event.clientY, left: box.left, top: box.top })
   }
 
   function onPointerMove(event) {
     if (!drag) return
-    setLive(UI.clampPosition(
-      drag.left + (event.clientX - drag.x),
-      drag.top + (event.clientY - drag.y),
-      viewport(),
-      size,
-    ))
+    const dx = event.clientX - drag.x
+    const dy = event.clientY - drag.y
+    if (!movedRef.current) {
+      // Every click wobbles a pixel or two. Below the slop this is still a click,
+      // so leave the window where it is and don't mark the gesture as a drag.
+      if (Math.abs(dx) + Math.abs(dy) < DRAG_SLOP) return
+      movedRef.current = true
+    }
+    setLive(UI.clampPosition(drag.left + dx, drag.top + dy, viewport(), size))
   }
 
   function onPointerUp() {
@@ -780,6 +792,13 @@ function MiniWindow() {
     }
   }
 
+  // True exactly once per finished drag: that click belongs to the drag.
+  function swallowDragClick() {
+    if (!movedRef.current) return false
+    movedRef.current = false
+    return true
+  }
+
   function stop(event) { event.stopPropagation() }
 
   if (collapsed) {
@@ -788,11 +807,21 @@ function MiniWindow() {
       ref: boxRef,
       className: 'ddz-pill' + (myTurn ? ' turn' : ''),
       style: { left: placed.x + 'px', top: placed.y + 'px' },
-      title: '展开斗地主浮窗',
-      onClick: function () { setPrefs({ collapsed: false }) },
+      title: '单击展开 · 拖动移动',
+      onClick: function (event) {
+        // A drag ends with a click the browser still delivers; without this the
+        // window expanded on every drop.
+        if (swallowDragClick()) {
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
+        setPrefs({ collapsed: false })
+      },
       onPointerDown: onPointerDown,
       onPointerMove: onPointerMove,
       onPointerUp: onPointerUp,
+      onPointerCancel: onPointerUp,
     },
       h('span', { className: 'ddz-dot' }),
       h('span', {}, '斗地主 · ' + (myTurn ? '该你了' : (snapshot ? UI.phaseLabel(snapshot.phase) : '未进桌'))),

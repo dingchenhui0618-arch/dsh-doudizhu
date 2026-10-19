@@ -20,6 +20,7 @@ import { PHASES, placeBid } from '../src/game.js'
 import { act, applyAction, createRoom, joinSeat, snapshotFor } from '../src/room.js'
 import { seedRandom } from '../src/rng.js'
 import { canBeat, cardFromId, classifyMove } from '../src/rules.js'
+import { PREFS_KEY } from '../src/ui-logic.js'
 
 const BUNDLE = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 const TOKEN_HEADER = 'x-dsh-doudizhu-token'
@@ -435,6 +436,77 @@ test('the floating window renders the lobby before you are in a table', async ()
   assert.ok(text.includes('昵称'), '能填昵称')
   assert.ok(text.includes('端口'), '开房能看到端口')
   assert.ok(harness.calls.some((call) => call.url === '/dsh-doudizhu/state'), '挂上了轮询')
+})
+
+/* The slim pill is a <button> that expands on click *and* drags. A drag ends
+ * with a click the browser still delivers, so dragging used to pop the window
+ * open — the reported "拖动以后会自动打开". A 4px slop keeps the two gestures
+ * apart; these two tests pin both directions. */
+const PILL_BOX = { left: 900, top: 40, width: 148, height: 30 }
+
+async function mountPill() {
+  const harness = createHarness(statePayload('idle', null))
+  harness.storage.set(PREFS_KEY, JSON.stringify({ collapsed: true, x: 800, y: 40 }))
+  harness.apply()
+  harness.mount('shell.overlay')
+  await harness.settle()
+  return harness
+}
+
+function pillOf(harness) {
+  return look(harness).find((node) => node.kind === 'element' && node.className.split(' ').includes('ddz-pill')) || null
+}
+
+/** The walk has no DOM, so stand in for the node the drag code measures. */
+function pillNode(harness) {
+  const pill = pillOf(harness)
+  assert.ok(pill, '收起状态应该只剩一颗药丸')
+  pill.props.ref.current = { getBoundingClientRect: () => ({ ...PILL_BOX }) }
+  return pill
+}
+
+const capture = { setPointerCapture() {} }
+
+test('dragging the slim pill moves the window without expanding it', async () => {
+  const harness = await mountPill()
+  let pill = pillNode(harness)
+  pill.props.onPointerDown({ button: 0, clientX: 1000, clientY: 50, pointerId: 7, currentTarget: capture })
+  pill = pillNode(harness)
+  pill.props.onPointerMove({ clientX: 1040, clientY: 72 })
+  pill = pillNode(harness)
+  pill.props.onPointerUp({ clientX: 1040, clientY: 72 })
+  pill = pillNode(harness)
+
+  // What the browser still delivers once the drag ends.
+  const event = { prevented: 0, preventDefault() { this.prevented += 1 }, stopPropagation() {} }
+  pill.props.onClick(event)
+
+  const stored = JSON.parse(harness.storage.get(PREFS_KEY))
+  assert.equal(stored.collapsed, true, '拖完还得是收起的，不能自己弹出窗口')
+  assert.equal(stored.x, 940, '窗口要真的跟着指针走')
+  assert.equal(stored.y, 62)
+  assert.equal(event.prevented, 1, '拖着结束的那一次 click 要被吃掉')
+  assert.ok(pillOf(harness), '浮窗还是药丸形态')
+})
+
+test('a press that never crosses the slop is still a click, so the window opens', async () => {
+  const harness = await mountPill()
+  let pill = pillNode(harness)
+  pill.props.onPointerDown({ button: 0, clientX: 1000, clientY: 50, pointerId: 8, currentTarget: capture })
+  pill = pillNode(harness)
+  // 3px of wobble: every real click has some, and it must not count as a drag.
+  pill.props.onPointerMove({ clientX: 1002, clientY: 51 })
+  pill = pillNode(harness)
+  pill.props.onPointerUp({})
+  pill = pillNode(harness)
+  pill.props.onClick({ preventDefault() {}, stopPropagation() {} })
+
+  const stored = JSON.parse(harness.storage.get(PREFS_KEY))
+  assert.equal(stored.collapsed, false, '没拖动就是单击，窗口要展开')
+  assert.equal(stored.x, 800, '一点点抖动不能把窗口挪走')
+  assert.equal(stored.y, 40)
+  assert.equal(pillOf(harness), null, '展开后不再是药丸')
+  assert.ok(hasClass(look(harness), 'ddz-mini'), '浮窗出来了')
 })
 
 test('a host in bidding shows the room code, the LAN address, and the bid buttons', async () => {
