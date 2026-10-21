@@ -33,6 +33,7 @@ import {
   phaseLabel,
   playEntries,
   playError,
+  pollPeriod,
   prefsFrom,
   relativeSeat,
   roleLabel,
@@ -41,6 +42,7 @@ import {
   shareText,
   lanChips,
   hiddenLanCandidates,
+  waitingOnBot,
   statusLine,
   suitSymbol,
   toggleSelection,
@@ -592,5 +594,34 @@ test('history: grouped by trick, and a pass is part of the record', () => {
   assert.equal(old.length, 1)
   assert.equal(old[0].items[0].name, '乙')
   assert.deepEqual(turnGroups(null), [])
+})
+
+test('a table waiting on a computer asks again sooner', () => {
+  const seats = [
+    { seat: 0, name: '我', bot: null, isYou: true },
+    { seat: 1, name: '电脑·困难', bot: 'hard' },
+    { seat: 2, name: '乙', bot: null },
+  ]
+  const playing = { phase: 'playing', toAct: 1, seats, canPlay: false }
+  assert.equal(waitingOnBot(playing), true)
+  assert.equal(pollPeriod(playing, { collapsed: false }), 260)
+  assert.equal(pollPeriod(playing, { collapsed: true }), 260, '电脑在出牌，收起浮窗也别等到 2.6 秒')
+
+  // A human on the clock is the slow case: nothing happens until they move.
+  const mine = { phase: 'playing', toAct: 0, seats, canPlay: true }
+  assert.equal(waitingOnBot(mine), false)
+  assert.equal(pollPeriod(mine, { collapsed: false }), 900)
+  assert.equal(pollPeriod(mine, { collapsed: true }), 2600)
+
+  // Bidding counts as being on the clock; the lobby is nobody's turn.
+  assert.equal(waitingOnBot({ phase: 'bidding', bidTurnSeat: 1, seats }), true)
+  assert.equal(waitingOnBot({ phase: 'bidding', bidTurnSeat: 0, seats }), false)
+  assert.equal(waitingOnBot({ phase: 'lobby', seats }), false)
+  assert.equal(waitingOnBot({ phase: 'finished', toAct: 1, seats }), false)
+  assert.equal(waitingOnBot(null), false)
+  assert.equal(waitingOnBot({ phase: 'playing', toAct: 1, seats: [] }), false, '没有座位信息就不要乱猜')
+
+  // An older snapshot has no per-seat flag; unknown is not "a computer".
+  assert.equal(waitingOnBot({ phase: 'playing', toAct: 1 }), false)
 })
 

@@ -23,6 +23,7 @@ import {
   act,
   applyBotAction,
   botTurnSeat,
+  watchRoom,
   closeRoom,
   joinSeat,
   roomInfo,
@@ -175,14 +176,15 @@ export async function createAuthorityServer(
     botTimer.unref?.()
   }
 
+  // The driver hangs on the room, not on this server's request handler: the local
+  // player's moves arrive through the plugin's loopback route and would otherwise
+  // never re-arm it, leaving the table waiting on a computer forever.
+  const unwatchBots = watchRoom(room, () => scheduleBot())
+
   const server = http.createServer((req, res) => {
-    handle(req, res, room, pollTimeoutMs)
-      .catch((error) => {
-        send(res, 500, { ok: false, error: `服务端错误：${error?.message ?? error}` })
-      })
-      // A join can fill the last seat and deal, and an action can hand the turn to
-      // a computer. Checking in one place after every request covers all of them.
-      .finally(() => scheduleBot())
+    handle(req, res, room, pollTimeoutMs).catch((error) => {
+      send(res, 500, { ok: false, error: `服务端错误：${error?.message ?? error}` })
+    })
   })
 
   const ready = new Promise((resolve, reject) => {
@@ -215,6 +217,7 @@ export async function createAuthorityServer(
         botDelayMs,
         close: () => {
           closed = true
+          unwatchBots()
           if (botTimer) clearTimeout(botTimer)
           botTimer = null
           return closeAuthority(server, room)

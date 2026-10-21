@@ -78,7 +78,6 @@ function uniqueName(room, name, seat) {
 }
 
 function notify(room) {
-  if (!room.waiters.size) return
   const waiters = [...room.waiters]
   room.waiters.clear()
   for (const waiter of waiters) {
@@ -87,6 +86,33 @@ function notify(room) {
     } catch {
       // One broken waiter must not stop the others from being released.
     }
+  }
+  // Watchers outlive any single poll: the computer driver is one, and it has to
+  // hear about a change made through ANY surface — the authority's HTTP server,
+  // the plugin's loopback route, or another computer's move. Hanging that on a
+  // request handler is what left a table frozen with nobody to ask.
+  if (!room.watchers?.size) return
+  for (const watcher of [...room.watchers]) {
+    try {
+      watcher(room)
+    } catch {
+      // A broken watcher must not turn a legal move into a failed one.
+    }
+  }
+}
+
+/**
+ * Subscribe to every room change. Returns an unsubscribe function.
+ *
+ * This is the room's own "something happened" edge, so a driver that has to act
+ * on its own (the computers) does not depend on who made the change or on which
+ * transport carried it.
+ */
+export function watchRoom(room, listener) {
+  if (!room.watchers) room.watchers = new Set()
+  room.watchers.add(listener)
+  return () => {
+    room.watchers.delete(listener)
   }
 }
 
@@ -177,6 +203,15 @@ export function createRoom({ code = randomCode(6), name = '斗地主房间', rng
     log: [],
     rng,
     waiters: new Set(),
+    /**
+     * Long-lived listeners told about every room change, whoever made it.
+     *
+     * `waiters` are the HTTP long-polls: they are one-shot and only exist while
+     * somebody is waiting. A computer player is the opposite — it has nobody to
+     * ask and must be driven from the room itself, so the driver hangs on these
+     * instead of on a transport event. See `watchRoom`.
+     */
+    watchers: new Set(),
     createdAt: Date.now(),
     /** The seat that owns the room's setup; the first human to sit down. */
     hostSeat: null,

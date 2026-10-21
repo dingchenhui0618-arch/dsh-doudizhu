@@ -166,6 +166,55 @@ function assertNoForeignCards(views, label) {
 }
 
 /** A legal-but-plain move: lead lowest, otherwise beat a single or pass. */
+/**
+ * The single-machine game: one human on the host machine, two computers, and
+ * nobody else touching the LAN port.
+ *
+ * The floating window only ever talks to this machine's loopback route, so this
+ * is the path a table full of computers has to keep playing on. It was broken:
+ * the driver hung on the authority's request handler, so a computer only moved
+ * when a *guest* polled — a one-person game froze on the first computer turn.
+ */
+test('two computers keep playing with nobody else on the LAN port', async (t) => {
+  const { baseUrl } = await mount(t, { port: 0, playerName: '房主' })
+  const local = localClient(baseUrl)
+  await local.get()
+
+  const hosted = await local.post('host', { port: 0 })
+  assert.ok(hosted.data.ok, hosted.data.error)
+
+  const filled = await local.post('act', { action: { type: 'bots', level: 'hard', count: 2 } })
+  assert.ok(filled.data.ok, filled.data.error)
+  assert.equal(filled.data.snapshot.phase, 'bidding')
+  assert.ok(filled.data.snapshot.seats.filter((seat) => seat.bot).length === 2)
+
+  let steps = 0
+  let snapshot = filled.data.snapshot
+  // Wall-clock bound, not a step count: `/state` long-polls when nothing changes, so
+  // a frozen table would otherwise sit in one call for the whole poll timeout.
+  const deadline = Date.now() + 30000
+  while (snapshot.phase !== 'finished' && Date.now() < deadline) {
+    const seat = snapshot.phase === 'bidding' ? snapshot.bidTurnSeat : snapshot.toAct
+    const entry = snapshot.seats[seat]
+    if (!entry.bot) {
+      // The human's turn: answer through the loopback route, exactly like the window.
+      const action =
+        snapshot.phase === 'bidding'
+          ? { type: 'bid', score: (snapshot.bids?.length ?? 0) === 0 ? 1 : 0 }
+          : pickAction(snapshot)
+      const result = await local.post('act', { action })
+      assert.ok(result.data.ok, `${result.data.error}（我的回合 ${action.type}）`)
+      steps += 1
+    }
+    // A computer's turn is somebody else's job: give the driver a moment and look
+    // again. If it never moves, the loop runs out of steps and fails below.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    snapshot = (await local.get()).data.snapshot
+  }
+
+  assert.equal(snapshot.phase, 'finished', `两台电脑应当自己打完这一局（停在 ${snapshot.phase}，我出牌 ${steps} 次）`)
+})
+
 function pickAction(view) {
   const hand = [...view.you.hand].sort((a, b) => cardFromId(a).value - cardFromId(b).value)
   if (!view.lastPlay || view.canPass === false) return { type: 'play', cards: [hand[0]] }

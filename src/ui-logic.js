@@ -128,6 +128,27 @@ export function activeSeat(snapshot) {
 }
 
 /**
+ * Is the table waiting on a computer right now?
+ *
+ * The poll period reads from this. A computer answers in a fraction of a second,
+ * so polling at the idle rate makes every one of its moves look like a stall;
+ * when the acting seat is a machine the window asks again sooner.
+ */
+export function waitingOnBot(snapshot) {
+  const seat = activeSeat(snapshot)
+  if (seat === null || seat === undefined) return false
+  const entry = Array.isArray(snapshot?.seats) ? snapshot.seats[seat] : null
+  if (!entry) return false
+  return Boolean(entry.bot ?? entry.isBot)
+}
+
+/** The poll period this snapshot deserves, in milliseconds. */
+export function pollPeriod(snapshot, { collapsed = false, active = 900, quiet = 2600, bot = 260 } = {}) {
+  if (waitingOnBot(snapshot)) return bot
+  return collapsed ? quiet : active
+}
+
+/**
  * Bid buttons. "不叫" is always available on your turn; a score must be
  * strictly higher than the standing bid.
  */

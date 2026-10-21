@@ -19,6 +19,8 @@ const API = '/dsh-doudizhu'
 const TOKEN_HEADER = 'x-dsh-doudizhu-token'
 const POLL_MS = 900
 const POLL_MS_QUIET = 2600
+/** A computer answers in a few hundred milliseconds; ask again in the same league. */
+const POLL_MS_BOT = 260
 const PILL_W = 148
 // Pointer slop that separates a click from a drag, in CSS pixels. A press that
 // never exceeds it keeps its click; anything beyond is a drag and loses it.
@@ -1067,10 +1069,17 @@ function MiniWindow() {
     setSelection(next)
   }, [])
 
-  // Poll less often while collapsed; the pill only needs to notice a turn.
+  // Poll less often while collapsed; the pill only needs to notice a turn. While a
+  // computer is on the clock the window asks again sooner, so its move does not
+  // arrive a whole idle period late.
   React.useEffect(function () {
-    setPeriod(collapsed ? POLL_MS_QUIET : POLL_MS)
-  }, [collapsed])
+    setPeriod(UI.pollPeriod(snapshot, {
+      collapsed: collapsed,
+      active: POLL_MS,
+      quiet: POLL_MS_QUIET,
+      bot: POLL_MS_BOT,
+    }))
+  }, [collapsed, snapshot])
 
   // The window's height is whatever its content needs — an empty lobby is short,
   // a landlord's 20 cards are not — and the stylesheet caps it at 78vh. Clamping
