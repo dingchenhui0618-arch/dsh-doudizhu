@@ -54,6 +54,29 @@ function cleanName(name, seat) {
   return capped || `玩家${seat + 1}`
 }
 
+/**
+ * `name`, or `name 2` / `name 3` … when another occupied seat already uses it,
+ * so two people who both call themselves 张飞 stay distinguishable on screen.
+ * The suffix eats into the base rather than the cap: the result never exceeds
+ * MAX_NAME and never ends up empty, and the loop always terminates because each
+ * candidate it tries is different and only a handful of names are taken.
+ */
+function uniqueName(room, name, seat) {
+  const taken = new Set()
+  room.seats.forEach((entry, index) => {
+    if (entry && index !== seat) taken.add(entry.name)
+  })
+  let candidate = name
+  let suffixNo = 2
+  while (taken.has(candidate)) {
+    const suffix = ` ${suffixNo}`
+    const baseLength = Math.max(1, MAX_NAME - [...suffix].length)
+    candidate = `${[...name].slice(0, baseLength).join('')}${suffix}`
+    suffixNo += 1
+  }
+  return candidate
+}
+
 function notify(room) {
   if (!room.waiters.size) return
   const waiters = [...room.waiters]
@@ -208,7 +231,7 @@ export function joinSeat(room, { name, token, code } = {}) {
     const existing = seatForToken(room, token)
     if (existing === null) return { ok: false, error: '身份已失效，请重新入座', reason: 'stale-token' }
     const seat = room.seats[existing]
-    if (name) seat.name = cleanName(name, existing)
+    if (name) seat.name = uniqueName(room, cleanName(name, existing), existing)
     seat.connected = true
     syncNames(room)
     bump(room, `${seat.name} 重新连接`)
@@ -235,7 +258,13 @@ export function joinSeat(room, { name, token, code } = {}) {
   }
 
   const issued = randomBytes(24).toString('hex')
-  room.seats[free] = { seat: free, name: cleanName(name, free), token: issued, connected: true, joinedAt: Date.now() }
+  room.seats[free] = {
+    seat: free,
+    name: uniqueName(room, cleanName(name, free), free),
+    token: issued,
+    connected: true,
+    joinedAt: Date.now(),
+  }
   if (room.hostSeat === null) room.hostSeat = free
   const started = maybeStart(room)
   bump(room, `${room.seats[free].name} 入座${started ? '，开局' : ''}`)
@@ -318,6 +347,20 @@ function setBots(room, seat, action) {
   return { ok: true, seat, level, bots, added, removed, started }
 }
 
+/** Adopt a new display name, deduplicated against the other seats. */
+function renameSeat(room, seat, rawName) {
+  const current = room.seats[seat]
+  if (!current) return { ok: false, error: '这个座位还没有人' }
+  const before = current.name
+  const name = uniqueName(room, cleanName(rawName, seat), seat)
+  // A rename that changes nothing is not a room change: no log line, no wakeup.
+  if (name === before) return { ok: true, seat, name }
+  current.name = name
+  syncNames(room)
+  bump(room, `${before} 改名为 ${name}`)
+  return { ok: true, seat, name }
+}
+
 /**
  * Apply one player action for a seat. Every rule decision is delegated to the
  * engine, so an out-of-turn or illegal action is refused there rather than here.
@@ -325,6 +368,8 @@ function setBots(room, seat, action) {
 export function applyAction(room, seat, action) {
   const type = String(action?.type ?? '')
   const game = room.game
+
+  if (type === 'rename') return renameSeat(room, seat, action.name)
 
   if (type === 'start') {
     if (game.phase !== PHASES.LOBBY) return { ok: false, error: '已经开局' }
@@ -507,7 +552,7 @@ function hintFor(room, seat) {
   if (game.phase === PHASES.PLAYING) {
     if (game.toAct !== seat) return `等待 ${game.players[game.toAct]?.name ?? ''} 出牌`
     if (!game.lastPlay) return '你先手，必须出牌'
-    return `出能压过「${game.lastPlay.move.label}」的牌，或选择不出`
+    return `要出比「${game.lastPlay.move.label}」更大的牌，或者不出`
   }
   if (game.phase === PHASES.FINISHED) {
     const seatName = game.finishedSeat === null ? '' : game.players[game.finishedSeat].name
@@ -581,6 +626,14 @@ export function snapshotFor(room, seat) {
       seat: play.seat,
       cards: [...play.cards],
       move: publicMove(play.move),
+    })),
+    // The whole turn flow, including "不出", so a spectator can read the table
+    // in order. Cards here are already public by definition (they were played).
+    turns: game.turns.map((turn) => ({
+      seat: turn.seat,
+      kind: turn.kind,
+      cards: [...turn.cards],
+      move: turn.move ? publicMove(turn.move) : null,
     })),
     finishedSeat: game.finishedSeat,
     winnerSide: game.winnerSide,

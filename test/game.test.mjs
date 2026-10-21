@@ -28,7 +28,7 @@ import {
   playCards,
   startHand,
 } from '../src/game.js'
-import { classifyMove, deckIds } from '../src/rules.js'
+import { classifyMove, deckIds, sortCardIds } from '../src/rules.js'
 import { seedRandom } from '../src/rng.js'
 
 const SEED = 20261015
@@ -472,4 +472,47 @@ test('queries expose counts, not other players cards', () => {
 
   const counts = handCounts(withJokers)
   assert.equal(JSON.stringify(counts).includes('LJ'), false, 'counts never leak card ids')
+})
+
+test('turns 按时间顺序记下出牌与不出，plays 只保留出牌', () => {
+  const state = playing({ hands: { 0: ['S3', 'H3', 'D8'], 1: ['D6', 'C7'], 2: ['C9', 'S10'] }, landlordSeat: 0 })
+  assert.deepEqual(state.turns, [], '刚发完牌回合流水是空的')
+
+  const opened = playCards(state, 0, ['H3', 'S3'])
+  assert.ok(opened.ok, opened.error)
+  assert.equal(opened.state.turns.length, 1, '出一手牌记一条流水')
+  const played = opened.state.turns[0]
+  assert.equal(played.seat, 0)
+  assert.equal(played.kind, 'play')
+  assert.deepEqual(played.cards, sortCardIds(['H3', 'S3']), '记录的牌是排好序的实际出牌')
+  assert.equal(played.move.type, classifyMove(['H3', 'S3']).type, '流水里带着牌型')
+  assert.equal(opened.state.plays.length, 1)
+
+  const first = passTurn(opened.state, 1)
+  assert.ok(first.ok, first.error)
+  assert.deepEqual(first.state.turns.map((turn) => turn.kind), ['play', 'pass'], '不出也记一条')
+  assert.deepEqual(first.state.turns[1], { seat: 1, kind: 'pass', cards: [], move: null })
+  assert.equal(first.state.plays.length, 1, '不出不算一次出牌，plays 长度不变')
+
+  const second = passTurn(first.state, 2)
+  assert.ok(second.ok, second.error)
+  assert.deepEqual(second.state.turns.map((turn) => turn.kind), ['play', 'pass', 'pass'])
+  assert.equal(second.state.plays.length, 1, '两家不出之后 plays 仍然只有一手')
+  assert.equal(second.state.lastPlay, null, '台面清空，但流水留着')
+  assert.equal(second.state.toAct, 0)
+})
+
+test('新的一局会清空回合流水', () => {
+  assert.deepEqual(createGame(NAMES).turns, [], '大厅游戏就有空的 turns')
+  assert.deepEqual(deal().turns, [], '发牌后流水为空')
+
+  let state = playing({ hands: { 0: ['S3'], 1: ['H4', 'D6'], 2: ['C9'] }, landlordSeat: 0 })
+  state = playCards(state, 0, ['S3']).state
+  assert.equal(state.phase, PHASES.FINISHED)
+  assert.equal(state.turns.length, 1, '收尾的那手牌也在流水里')
+
+  const second = nextHand(state, { rng: seedRandom(SEED + 1) })
+  assert.ok(second.ok, second.error)
+  assert.deepEqual(second.state.turns, [], '下一局重新开流水')
+  assert.deepEqual(second.state.plays, [], 'plays 也跟着清空')
 })

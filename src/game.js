@@ -74,6 +74,7 @@ export function createGame(names = ['玩家一', '玩家二', '玩家三']) {
     lastPlay: null,
     passes: 0,
     plays: [],
+    turns: [],
     finishedSeat: null,
     winnerSide: null,
     handsWon: { landlord: 0, farmers: 0 },
@@ -111,6 +112,7 @@ export function startHand(state, { rng, countHand = true } = {}) {
     lastPlay: null,
     passes: 0,
     plays: [],
+    turns: [],
     finishedSeat: null,
     winnerSide: null,
   })
@@ -148,6 +150,7 @@ function beginPlay(state, landlordSeat) {
     lastPlay: null,
     passes: 0,
     plays: [],
+    turns: [],
   }
 }
 
@@ -197,6 +200,16 @@ export function checkPlay(state, seat, cardIds) {
   return { ok: true, move }
 }
 
+/**
+ * The per-turn flow (`play` and `pass`, in order). `plays` stays the record of
+ * played groups only — bots count cards from it — while `turns` is the history a
+ * spectator wants to read. A state serialized before this field existed has no
+ * `turns`, so reading it defensively keeps an old room loadable.
+ */
+function turnsOf(state) {
+  return Array.isArray(state.turns) ? state.turns : []
+}
+
 function finish(state, seat) {
   const side = winnerSide(seat, state.landlordSeat)
   return {
@@ -223,6 +236,9 @@ export function playCards(state, seat, cardIds) {
     ...state,
     players,
     plays: [...state.plays, play],
+    // `plays` keeps only real plays; the turn log also carries each play so the
+    // UI can interleave "出牌" and "不出" in one timeline.
+    turns: [...turnsOf(state), { seat, kind: 'play', cards: [...ids], move: check.move }],
     lastPlay: { seat, cards: ids, move: check.move },
     passes: 0,
   }
@@ -245,11 +261,12 @@ export function passTurn(state, seat) {
   if (seat !== state.toAct) return fail(`该 ${state.toAct} 号座位出牌`)
   if (!state.lastPlay) return fail('你是先手，必须出牌，不能不出')
 
+  const turns = [...turnsOf(state), { seat, kind: 'pass', cards: [], move: null }]
   const passes = state.passes + 1
   if (passes >= SEAT_COUNT - 1) {
-    return ok({ ...state, passes: 0, lastPlay: null, toAct: state.lastPlay.seat })
+    return ok({ ...state, passes: 0, lastPlay: null, toAct: state.lastPlay.seat, turns })
   }
-  return ok({ ...state, passes, toAct: nextSeat(seat) })
+  return ok({ ...state, passes, toAct: nextSeat(seat), turns })
 }
 
 /** Rotate the first-bid seat clockwise and deal the next hand. */

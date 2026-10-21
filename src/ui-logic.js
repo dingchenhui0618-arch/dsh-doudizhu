@@ -10,7 +10,17 @@
  * shows whatever the room refuses.
  */
 
-import { BID_LABELS, SUIT_SYMBOLS, canBeat, cardFromId, classifyMove } from './rules.js'
+import {
+  BID_LABELS,
+  SUIT_SYMBOLS,
+  canBeat,
+  cardFromId,
+  classifyMove,
+  enumerateBeats,
+  enumerateMoves,
+  moveKey,
+  sortCardIds,
+} from './rules.js'
 
 export const PREFS_KEY = 'dsh-doudizhu.prefs'
 
@@ -216,6 +226,137 @@ export function playEntries(snapshot) {
   })
 }
 
+/**
+ * Longest nickname the window accepts, in code points. `room.js` enforces the
+ * same cap (`MAX_NAME`); `test/ui-logic.test.mjs` pins the two numbers together,
+ * because an input box that accepts more than the room keeps is a lie that only
+ * shows up on the other two machines.
+ */
+export const MAX_NICK = 12
+
+/** Trim, drop control characters, then cap by code points — not UTF-16 units. */
+export function normaliseNickname(text) {
+  const cleaned = String(text ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim()
+  return [...cleaned].slice(0, MAX_NICK).join('')
+}
+
+/**
+ * One short line under the name box: what the other two will actually see.
+ * Saying it here beats letting a clash or a silent fallback surprise the player
+ * after they have already taken a seat.
+ */
+export function nicknameNote(raw, { taken = [], seat = 0 } = {}) {
+  const name = normaliseNickname(raw)
+  if (!name) return `留空就叫「玩家${seat + 1}」`
+  if (taken.includes(name)) return `已有同名，入座后会自动加序号区分`
+  return `另外两家会看到「${name}」`
+}
+
+/**
+ * Suggested plays for the seat on screen, best first — the engine behind 提示 and
+ * 帮我出.
+ *
+ * `rules.js` is bundled into the client, so the candidates are the same legal
+ * moves the authority will accept: no round trip, no waiting on a slow LAN, and
+ * nothing to desynchronise. The ranking is three cheap rules a human agrees with
+ * instantly: finishing the hand beats any other consideration, spending a bomb
+ * to answer an ordinary card is a last resort, and among equals the lowest card
+ * goes first so a hint never throws away a control card for free.
+ */
+export function hintMoves(snapshot, { limit = 8 } = {}) {
+  const hand = Array.isArray(snapshot?.you?.hand) ? snapshot.you.hand : []
+  if (!hand.length) return []
+  const target = snapshot?.lastPlay && snapshot.lastPlay.move ? snapshot.lastPlay.move : null
+  const moves = target ? enumerateBeats(hand, target) : enumerateMoves(hand)
+  const seen = new Set()
+  const ranked = []
+  for (const entry of moves) {
+    const key = moveKey(entry.move)
+    if (seen.has(key)) continue
+    seen.add(key)
+    const cards = sortCardIds(entry.cardIds ?? [])
+    const type = entry.move?.type ?? ''
+    ranked.push({
+      key,
+      cards,
+      move: entry.move,
+      finishes: cards.length === hand.length,
+      bomb: type === 'bomb' || type === 'rocket',
+      value: Number(entry.move?.mainValue ?? 0),
+    })
+  }
+  ranked.sort(function (left, right) {
+    if (left.finishes !== right.finishes) return left.finishes ? -1 : 1
+    if (left.bomb !== right.bomb) return left.bomb ? 1 : -1
+    if (left.value !== right.value) return left.value - right.value
+    return right.cards.length - left.cards.length
+  })
+  return ranked.slice(0, Math.max(1, limit)).map(function (entry, index) {
+    return {
+      id: `hint-${index}`,
+      cards: entry.cards,
+      label: entry.move?.label ?? '',
+      note: entry.finishes ? '一把走完' : entry.bomb ? '动炸弹' : '',
+      finishing: entry.finishes,
+    }
+  })
+}
+
+/**
+ * The play history grouped by trick — one group per time the table was cleared.
+ *
+ * `turns` is the room's full turn record (play **and** pass, in order). Older
+ * snapshots only carry `plays`, so those still render, as one flat group: the
+ * window must not go blank just because it is talking to a 0.1.x authority.
+ * A trick is over once two seats have passed in a row, which is exactly the
+ * rule the engine uses to hand the lead back to the last player who played.
+ */
+export function turnGroups(snapshot) {
+  const seats = Array.isArray(snapshot?.seats) ? snapshot.seats : []
+  function nameOf(seat) {
+    return seats[seat]?.name ?? `座位${Number(seat) + 1}`
+  }
+  const turns = Array.isArray(snapshot?.turns)
+    ? snapshot.turns
+    : Array.isArray(snapshot?.plays)
+      ? snapshot.plays.map((play) => ({ seat: play.seat, kind: 'play', cards: play.cards, move: play.move }))
+      : []
+  const groups = []
+  let passes = 0
+  for (const turn of turns) {
+    const kind = turn?.kind === 'pass' ? 'pass' : 'play'
+    if (!groups.length || passes >= 2) {
+      passes = 0
+      groups.push({ index: groups.length + 1, lead: turn.seat, items: [] })
+    }
+    const group = groups[groups.length - 1]
+    const cards = Array.isArray(turn.cards) ? turn.cards : []
+    const label = kind === 'pass' ? '不出' : (turn.move?.label ?? '')
+    group.items.push({
+      key: `t${groups.length}-${group.items.length}`,
+      seat: turn.seat,
+      name: nameOf(turn.seat),
+      kind,
+      cards,
+      label,
+      text: kind === 'pass' ? '不出' : cards.map(cardText).join(' '),
+      lead: group.items.length === 0,
+    })
+    passes = kind === 'pass' ? passes + 1 : 0
+  }
+  return groups
+}
+
+/** A one-line summary for the collapsed history: how busy the hand has been. */
+export function historySummary(snapshot) {
+  const groups = turnGroups(snapshot)
+  const turns = groups.reduce((total, group) => total + group.items.length, 0)
+  if (!turns) return '本局还没有人出牌'
+  return `本局 ${groups.length} 轮 · ${turns} 手`
+}
+
 /** The text to hand to the other two players, so nothing has to be retyped. */export function shareText(authority) {
   if (!authority || !authority.code) return ''
   const urls = Array.isArray(authority.lanUrls) ? authority.lanUrls : []
@@ -334,14 +475,25 @@ export function prefsFrom(raw) {
   const x = typeof value.x === 'number' && Number.isFinite(value.x) ? Math.round(value.x) : null
   const y = typeof value.y === 'number' && Number.isFinite(value.y) ? Math.round(value.y) : null
   const name = typeof value.name === 'string' ? value.name.trim() : ''
+  // The last LAN address and room code are remembered so a friend on the same
+  // network does not retype `192.168.1.50:8791` and a six-letter code every time
+  // they reopen the window. Both are local-only text, capped so a pasted blob
+  // cannot end up in the input box.
+  const address = typeof value.lastAddress === 'string' ? value.lastAddress.trim().slice(0, 64) : ''
+  const code = typeof value.lastCode === 'string' ? value.lastCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) : ''
   return {
     x,
     y,
     collapsed: value.collapsed === true,
     // Only the table pane is shipped so far; anything else falls back to it.
     pane: value.pane === 'log' ? 'log' : 'table',
-    name: [...name].slice(0, 12).join(''),
+    name: [...name].slice(0, MAX_NICK).join(''),
     botLevel: isBotLevel(value.botLevel) ? String(value.botLevel) : DEFAULT_BOT_LEVEL,
+    lastAddress: address,
+    lastCode: code,
+    // The play history is folded away by default: the table is the point, and a
+    // long record would push the cards below the fold of the floating window.
+    historyOpen: value.historyOpen === true,
   }
 }
 

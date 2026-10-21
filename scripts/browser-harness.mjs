@@ -20,6 +20,12 @@
  * plugin's origin check: it stops cross-site pages, not local callers.
  *
  *   node scripts/browser-harness.mjs [--port 8792] [--target http://127.0.0.1:19387] [--theme dark]
+ *   node scripts/browser-harness.mjs --room        # in-process room, no DSH needed
+ *
+ * With `--room` the `/dsh-doudizhu/*` routes are answered by a real room from
+ * `src/room.js` instead of a running plugin, so screenshots do not depend on
+ * whether the app has been restarted since the host half last changed. The page
+ * then takes `?room=lobby|table|history` and `?prefs=<json>`, both harness-only.
  *
  * The React UMD files are expected in `_tmp/` (see README); they are fetched
  * once so the browser itself never needs the network.
@@ -31,6 +37,10 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readInstalledTokens, PLUGIN_TOKENS } from './dsh-theme.mjs'
+import { act, applyAction, createRoom, joinSeat, snapshotFor } from '../src/room.js'
+import { seedRandom } from '../src/rng.js'
+import { canBeat, cardFromId, classifyMove } from '../src/rules.js'
+import { PREFS_KEY } from '../src/ui-logic.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const TMP = join(ROOT, '_tmp')
@@ -43,6 +53,10 @@ function flag(name, fallback) {
 const PORT = Number(flag('port', '8792'))
 const TARGET = String(flag('target', 'http://127.0.0.1:19387')).replace(/\/+$/, '')
 const THEME = String(flag('theme', 'dark'))
+// `--room` swaps the proxy for an in-process room driven by the real engine.
+// The proxy needs a running DSH whose host half already has the fields the new
+// client reads; a screenshot run must not depend on when that app was restarted.
+const LOCAL = process.argv.includes('--room')
 
 /**
  * Inject the *real* DSH theme tokens, read out of the installed app.
@@ -96,6 +110,17 @@ const PAGE = `<!doctype html>
 <p id="theme-note">/* THEME_NOTE */</p>
 <div id="layer"></div>
 <div id="view"></div>
+<script>
+  // Harness-only: a screenshot run picks a scenario and stored preferences through
+  // the URL. The plugin still reads them from the real localStorage itself.
+  (function () {
+    var query = new URLSearchParams(location.search);
+    var room = query.get('room');
+    if (room) document.cookie = 'ddz-room=' + room + ';path=/';
+    var prefs = query.get('prefs');
+    if (prefs) { try { localStorage.setItem('/*PREFS_KEY*/', prefs) } catch (error) {} }
+  })();
+</script>
 <script src="/react.js"></script>
 <script src="/react-dom.js"></script>
 <script>
@@ -137,8 +162,13 @@ const PAGE = `<!doctype html>
 
     var layer = document.getElementById('layer');
     var view = document.getElementById('view');
+    // In the real UI the two slots live in different panes and never share pixels.
+    // This page stacks them, so a screenshot of the floating window would show the
+    // conversation tab ghosting underneath it. Mount the tab only when asked.
+    var withTab = new URLSearchParams(location.search).get('tab') === '1';
     registered.forEach(function (item) {
       var overlay = item.meta.name === 'shell.overlay';
+      if (!overlay && !withTab) return;
       var host = document.createElement('div');
       host.className = 'harness-host';
       host.dataset.slot = item.meta.name;
@@ -230,17 +260,148 @@ async function proxy(req, res, body) {
   }
 }
 
+/**
+ * In-process rooms for screenshot runs.
+ *
+ * These are the *real* engine and the *real* `snapshotFor`: only DSH's HTTP layer
+ * is replaced. That keeps a screenshot honest — what the picture shows is what the
+ * authority would send — while removing the dependency on a DSH that happens to
+ * have been restarted since the host half changed.
+ */
+const WORLDS = new Map()
+
+/**
+ * Lead the cheapest single in the hand by *value*, not by the hand's own order:
+ * the order sorts 2s after aces, so "first card" would lead a 2 and nobody could
+ * answer it — which is exactly the dead end a screenshot run must not hit.
+ */
+function playLowest(room, tokens, seat) {
+  const hand = snapshotFor(room, seat).you.hand
+  const cheapest = [...hand].sort((left, right) => cardFromId(left).value - cardFromId(right).value)[0]
+  return act(room, tokens[seat], { type: 'play', cards: [cheapest] })
+}
+
+/** Beat `target` with the cheapest single that can, or report failure. */
+function followLowest(room, tokens, seat, target) {
+  // The hand arrives sorted high-to-low, so sort by value first: otherwise the
+  // "cheapest" follow would answer an ace with a two and leave the screenshot in
+  // a position where nothing on the table can be beaten at all.
+  const hand = [...snapshotFor(room, seat).you.hand]
+    .sort((left, right) => cardFromId(left).value - cardFromId(right).value)
+  for (const id of hand) {
+    const move = classifyMove([id])
+    if (move && canBeat(move, target)) {
+      const result = act(room, tokens[seat], { type: 'play', cards: [id] })
+      if (result.ok) return true
+    }
+  }
+  return false
+}
+
+function buildWorld(kind) {
+  const room = createRoom({ code: 'K7M2Q9', rng: seedRandom(kind === 'lobby' ? 7 : 2024) })
+  const names = ['阿橘', '阿凯', '小北']
+  const tokens = []
+  const seats = kind === 'lobby' ? names.slice(0, 1) : names
+  for (const name of seats) tokens.push(joinSeat(room, { name }).token)
+  if (kind === 'lobby') return { room, seat: 0, tokens }
+
+  const bid = act(room, tokens[0], { type: 'bid', score: 3 })
+  if (!bid.ok) throw new Error('桩房间叫分失败：' + bid.error)
+  const tricks = kind === 'history' ? 4 : 0
+  for (let index = 0; index < tricks; index += 1) {
+    playLowest(room, tokens, 0)
+    act(room, tokens[1], { type: 'pass' })
+    act(room, tokens[2], { type: 'pass' })
+  }
+  // Leave the table mid-trick with 小北 holding one single and it being my turn,
+  // so the felt, the "要压过它" note and the hint buttons all have something to say.
+  playLowest(room, tokens, 0)
+  act(room, tokens[1], { type: 'pass' })
+  followLowest(room, tokens, 2, snapshotFor(room, 0).lastPlay.move)
+  return { room, seat: 0, tokens }
+}
+
+function worldFor(kind) {
+  if (!WORLDS.has(kind)) WORLDS.set(kind, buildWorld(kind))
+  return WORLDS.get(kind)
+}
+
+function kindOf(req) {
+  const cookie = String(req.headers.cookie || '')
+  const match = /(?:^|;\s*)ddz-room=([a-z]+)/.exec(cookie)
+  return match && ['lobby', 'table', 'history'].includes(match[1]) ? match[1] : 'table'
+}
+
+function stateBody(world) {
+  const snapshot = snapshotFor(world.room, world.seat)
+  return {
+    ok: true,
+    protocol: 1,
+    role: 'host',
+    playerName: '阿橘',
+    defaults: { port: 8791, host: '0.0.0.0' },
+    authority: {
+      code: world.room.code,
+      port: 8791,
+      loopbackUrl: 'http://127.0.0.1:8791',
+      lanUrls: ['http://192.168.1.50:8791'],
+    },
+    guest: null,
+    lastError: null,
+    snapshot,
+  }
+}
+
+async function handleLocal(req, res, body) {
+  const path = String(req.url || '/').split('?')[0]
+  const kind = kindOf(req)
+  const world = worldFor(kind)
+  const reply = (payload) => {
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-dsh-doudizhu-token': 'harness-local',
+    })
+    res.end(JSON.stringify(payload))
+  }
+  const action = path.slice(path.lastIndexOf('/') + 1)
+  if (action === 'state') {
+    console.log(`[local] state ${kind}`)
+    return reply(stateBody(world))
+  }
+  if (action === 'act') {
+    let asked
+    try {
+      asked = JSON.parse(String(body || '{}')).action
+    } catch (error) {
+      return reply({ ok: false, error: 'body 不是 JSON' })
+    }
+    const result = applyAction(world.room, world.seat, asked)
+    console.log(`[local] act ${asked && asked.type} -> ${result.ok ? 'ok' : result.error}`)
+    return reply(result)
+  }
+  if (action === 'leave') WORLDS.clear()
+  return reply({ ok: true })
+}
+
 const server = createServer(async (req, res) => {
   const path = String(req.url || '/').split('?')[0]
   try {
     if (path === '/' || path === '/index.html') {
-      const page = PAGE.replace('/* THEME_CSS */', THEME_INFO.css).replace('/* THEME_NOTE */', THEME_INFO.note)
+      const page = PAGE
+        .replace('/* THEME_CSS */', THEME_INFO.css)
+        .replace('/* THEME_NOTE */', THEME_INFO.note)
+        .replace('/*PREFS_KEY*/', PREFS_KEY)
       return send(res, 200, 'text/html; charset=utf-8', page)
     }
     if (path === '/react.js') return await sendFile(res, join(TMP, 'react.js'), 'application/javascript; charset=utf-8')
     if (path === '/react-dom.js') return await sendFile(res, join(TMP, 'react-dom.js'), 'application/javascript; charset=utf-8')
     if (path === '/client.js') return await sendFile(res, join(ROOT, 'lib', 'client.js'), 'application/javascript; charset=utf-8')
-    if (path.startsWith('/dsh-doudizhu')) return await proxy(req, res, await readBody(req))
+    if (path.startsWith('/dsh-doudizhu')) {
+      const body = await readBody(req)
+      return LOCAL ? await handleLocal(req, res, body) : await proxy(req, res, body)
+    }
     if (path === '/favicon.ico') return send(res, 204, 'text/plain', '')
     send(res, 404, 'text/plain; charset=utf-8', 'not found')
   } catch (error) {
@@ -257,6 +418,6 @@ for (const required of ['react.js', 'react-dom.js']) {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`harness  http://127.0.0.1:${PORT}/`)
-  console.log(`target   ${TARGET}`)
+  console.log(`target   ${LOCAL ? 'in-process room (--room)' : TARGET}`)
   console.log(`theme    ${THEME} — ${THEME_INFO.note}`)
 })

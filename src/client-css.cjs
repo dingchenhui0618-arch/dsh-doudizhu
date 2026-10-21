@@ -11,7 +11,7 @@
 // prefers-reduced-motion.
 module.exports = `
 .ddz-pill{position:fixed;z-index:60;display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;
-  background:var(--dsw-alias-bg-overlay,#1c1c22);color:var(--dsw-alias-label-primary,#eee);cursor:pointer;
+  background:var(--dsw-alias-bg-layer-2,#26262e);color:var(--dsw-alias-label-primary,#eee);cursor:pointer;
   border:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.14));box-shadow:0 6px 18px rgba(0,0,0,.35);
   font-size:12px;pointer-events:auto;user-select:none;font-family:inherit;touch-action:none;
   transition:border-color .15s ease,transform .15s ease,box-shadow .15s ease}
@@ -23,8 +23,8 @@ module.exports = `
 .ddz-pill.turn .ddz-dot{background:var(--dsw-alias-state-success-primary,#3ecf72);animation:ddz-blink 1.5s ease-in-out infinite}
 @keyframes ddz-blink{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.8)}}
 
-.ddz-mini{position:fixed;z-index:60;display:flex;flex-direction:column;width:344px;max-height:78vh;
-  background:var(--dsw-alias-bg-overlay,#1c1c22);color:var(--dsw-alias-label-primary,#eee);
+.ddz-mini{position:fixed;z-index:60;display:flex;flex-direction:column;width:344px;max-height:88vh;
+  background:var(--dsw-alias-bg-layer-2,#26262e);color:var(--dsw-alias-label-primary,#eee);
   border:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.14));border-radius:14px;
   box-shadow:0 20px 48px rgba(0,0,0,.42),0 2px 8px rgba(0,0,0,.2);pointer-events:auto;overflow:hidden;
   font-family:inherit;font-size:13px;line-height:1.5}
@@ -40,7 +40,13 @@ module.exports = `
   cursor:pointer;font-size:13px;line-height:1;padding:0;transition:background .15s ease,transform .08s ease}
 .ddz-ico-btn:hover{background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.08))}
 .ddz-ico-btn:active{transform:scale(.92)}
-.ddz-mini-body{padding:10px;overflow:auto;display:flex;flex-direction:column;gap:9px;flex:1}
+.ddz-mini-body{padding:9px;overflow:auto;display:flex;flex-direction:column;gap:7px;flex:0 1 auto;min-height:0}
+/* The docked hand + buttons: fixed under the scrolling table, so playing never
+   needs a scroll. The table above it is the part that scrolls on a tall hand. */
+.ddz-dock{display:flex;flex-direction:column;gap:6px}
+.ddz-dock-bar{padding:7px 9px 9px;display:flex;flex-direction:column;gap:6px;flex:0 0 auto;
+  background:var(--dsw-alias-bg-layer-2,#26262e);
+  border-top:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.10))}
 .ddz-mini-foot{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.1))}
 
 .ddz-view{display:flex;flex-direction:column;gap:14px;padding:20px;height:100%;box-sizing:border-box;
@@ -84,51 +90,144 @@ module.exports = `
 .ddz-badge.turn{color:var(--dsw-alias-state-success-primary,#3ecf72);border-color:currentColor}
 .ddz-badge.gone{color:var(--dsw-alias-state-error-primary,#ff6b6b);border-color:currentColor}
 
-.ddz-seat{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:9px;font-size:12px;
-  background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.05));border:1px solid transparent;
-  transition:background .15s ease,border-color .15s ease,box-shadow .15s ease}
-.ddz-seat.active{border-color:var(--dsw-alias-state-success-primary,#3ecf72);
+.ddz-seats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.ddz-seat-card{display:flex;flex-direction:column;gap:3px;padding:5px 7px 6px;border-radius:9px;min-width:0;
+  background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.05));
+  border:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.10));
+  transition:border-color .15s ease,box-shadow .15s ease,background .15s ease}
+.ddz-seat-card.me{background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.09))}
+.ddz-seat-card.active{border-color:var(--dsw-alias-state-success-primary,#3ecf72);
   box-shadow:0 0 0 1px var(--dsw-alias-state-success-primary,#3ecf72)}
-.ddz-seat.me{background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.09))}
-.ddz-seat-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ddz-seat-count{margin-left:auto;color:var(--dsw-alias-label-secondary,#9aa);font-variant-numeric:tabular-nums}
-.ddz-seats{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.ddz-seats .ddz-seat.wide{grid-column:1 / -1}
-
-.ddz-table{border-radius:11px;padding:8px;min-height:76px;display:flex;flex-direction:column;gap:6px;
+.ddz-seat-top{display:flex;align-items:center;gap:4px;min-width:0}
+.ddz-ava{width:18px;height:18px;flex:0 0 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:9px;font-weight:600;background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.10));
+  border:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.20));color:var(--dsw-alias-label-secondary,#9aa)}
+.ddz-seat-card.active .ddz-ava{border-color:var(--dsw-alias-state-success-primary,#3ecf72);color:inherit}
+.ddz-seat-name{flex:1;min-width:0;font-weight:600;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ddz-seat-order{flex:0 0 auto;font-size:9px;color:var(--dsw-alias-label-secondary,#9aa)}
+.ddz-seat-line{display:flex;align-items:center;gap:4px;min-width:0}
+.ddz-seat-count{font-size:10px;color:var(--dsw-alias-label-secondary,#9aa);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ddz-seat-count b{font-size:11px;font-weight:600;color:var(--dsw-alias-label-primary,#eee)}
+.ddz-seat-idle{opacity:.7}
+.ddz-seat-note{font-size:9px;color:var(--dsw-alias-label-secondary,#9aa);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ddz-seat-card .ddz-badge{font-size:9px;padding:0 4px}
+.ddz-meter{height:3px;border-radius:999px;overflow:hidden;background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.10))}
+/* The fill carries no text, but it is a brand fill: the on-brand token keeps the
+   theme guard (and any label added later) honest. */
+.ddz-meter-fill{display:block;height:100%;border-radius:999px;
+  background:var(--dsw-alias-brand-primary,#4a7dff);
+  color:var(--dsw-alias-label-primary-foreground,var(--dsw-alias-bg-base,#111));
+  transition:width .25s ease}
+.ddz-meter-fill.low{background:var(--dsw-alias-state-warn-primary,#ffcf5c)}
+/* The felt answers exactly one question: what am I beating? Everything that
+   does not answer it stays out of this block. */
+.ddz-felt{border-radius:11px;padding:7px 8px;display:flex;flex-direction:column;gap:5px;
   background:linear-gradient(180deg,var(--dsw-alias-bg-layer-1,rgba(255,255,255,.05)),transparent);
-  border:1px dashed var(--dsw-alias-border-l2,rgba(255,255,255,.18))}
+  border:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.12))}
+.ddz-felt-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ddz-felt-label{font-size:11px;font-weight:600;letter-spacing:.02em;color:var(--dsw-alias-label-secondary,#9aa)}
+.ddz-felt-pass{font-size:11px;color:var(--dsw-alias-state-warn-primary,#ffcf5c);font-variant-numeric:tabular-nums}
+.ddz-felt-note{font-size:10px;color:var(--dsw-alias-label-secondary,#9aa)}
+.ddz-felt-cards{display:flex;gap:4px;flex-wrap:wrap;align-items:center;min-height:32px}
+.ddz-felt-bottom{font-size:10px;color:var(--dsw-alias-label-secondary,#9aa);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* Play history: a folded strip under the felt. The summary is always readable,
+   the detail opens in place — switching to a 记录 tab used to lose the table. */
+.ddz-history{border-radius:10px;overflow:hidden;
+  border:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.10));
+  background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.04))}
+.ddz-history-head{display:flex;align-items:center;gap:7px;width:100%;padding:6px 9px;box-sizing:border-box;
+  font:inherit;font-size:12px;cursor:pointer;text-align:left;
+  background:transparent;color:inherit;border:0;transition:background .15s ease}
+.ddz-history-head:hover{background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.07))}
+.ddz-history-head:focus-visible{outline:2px solid var(--dsw-alias-label-primary,#eee);outline-offset:-2px}
+.ddz-chev{width:10px;font-size:10px;color:var(--dsw-alias-label-secondary,#9aa)}
+.ddz-history-title{font-weight:600}
+.ddz-history-body{max-height:200px;overflow:auto;padding:2px 9px 8px;display:flex;flex-direction:column;gap:6px;
+  border-top:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.10))}
+.ddz-history-body.static{max-height:none;border-top:0;padding:0;overflow:visible}
+.ddz-trick{border-radius:8px;padding:5px 7px;display:flex;flex-direction:column;gap:2px;
+  background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.06));border:1px solid transparent}
+.ddz-trick.latest{border-color:var(--dsw-alias-border-l2,rgba(255,255,255,.20))}
+.ddz-trick-head{display:flex;align-items:center;gap:6px;font-size:10px;
+  color:var(--dsw-alias-label-secondary,#9aa);margin-bottom:2px}
+.ddz-trick-no{letter-spacing:.04em;font-variant-numeric:tabular-nums}
+.ddz-turn{display:grid;grid-template-columns:74px 1fr auto;gap:6px;align-items:baseline;font-size:12px;padding:1px 0}
+.ddz-turn-who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--dsw-alias-label-secondary,#9aa)}
+.ddz-turn-what{font-variant-numeric:tabular-nums;word-break:break-word}
+/* A pass is the quiet line in the record: dimmed as a whole, so the tricks that
+   actually moved cards are what the eye lands on. */
+.ddz-turn.pass{opacity:.55}
+.ddz-turn.pass .ddz-turn-what{color:var(--dsw-alias-label-secondary,#9aa)}
+.ddz-turn-shape{font-size:10px;color:var(--dsw-alias-label-secondary,#9aa);white-space:nowrap}
+
+/* The room's own status line: quiet, but the only place that knows whose turn it
+   is, so it sits right under the identity row instead of in a red error slot. */
+.ddz-status{font-size:12px;padding:4px 9px;border-radius:0 8px 8px 0;
+  color:var(--dsw-alias-label-primary,#eee);
+  background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.05));
+  border-left:2px solid var(--dsw-alias-brand-primary,#4a7dff)}
+/* 提示/帮我出 are helpers, not a second primary action: they keep the plain
+   secondary weight so the row has exactly one strong button (出牌). */
+.ddz-btn.hint,.ddz-btn.hint-play{color:var(--dsw-alias-label-secondary,#9aa)}
+.ddz-btn.hint:hover:not(:disabled),.ddz-btn.hint-play:hover:not(:disabled){color:var(--dsw-alias-label-primary,#eee)}
+.ddz-advice{font-size:11px;color:var(--dsw-alias-label-secondary,#9aa);font-variant-numeric:tabular-nums}
+.ddz-warn{color:var(--dsw-alias-state-error-primary,#ff6b6b)}
+.ddz-count-note{font-variant-numeric:tabular-nums}
 .ddz-play{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px}
 .ddz-play-who{color:var(--dsw-alias-label-secondary,#9aa);min-width:52px}
 .ddz-empty{font-size:12px;color:var(--dsw-alias-label-secondary,#9aa)}
 
 .ddz-hand{display:flex;flex-wrap:wrap;gap:4px;padding:2px 0;min-height:52px}
-.ddz-card{width:34px;height:48px;border-radius:7px;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;cursor:pointer;user-select:none;padding:0;font:inherit;
+/* A card reads top-left like a real one: rank over suit in the corner. Centring
+   the pair made a 24px-wide card look like a number with a speck under it. */
+.ddz-card{width:34px;height:48px;border-radius:7px;display:flex;flex-direction:column;
+  align-items:flex-start;justify-content:flex-start;cursor:pointer;user-select:none;padding:2px 0 0 4px;
+  box-sizing:border-box;font:inherit;text-align:left;
   background:linear-gradient(180deg,var(--dsw-alias-bg-layer-2,#26262e),var(--dsw-alias-bg-layer-1,#202027));
   color:var(--dsw-alias-label-primary,#eee);box-shadow:0 1px 2px rgba(0,0,0,.28);
   border:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.22));
   transition:transform .1s ease,box-shadow .1s ease,border-color .1s ease}
 .ddz-card:hover{transform:translateY(-4px);box-shadow:0 6px 14px rgba(0,0,0,.3)}
 .ddz-card:active{transform:translateY(-2px) scale(.97)}
-.ddz-card .ddz-rank{font-size:14px;font-weight:700;line-height:1}
-.ddz-card .ddz-suit{font-size:12px;line-height:1}
+.ddz-card .ddz-rank{font-size:14px;font-weight:700;line-height:1.05;letter-spacing:0}
+.ddz-card .ddz-suit{font-size:12px;line-height:1;margin-top:-1px}
 .ddz-card.red{color:var(--dsw-alias-state-error-primary,#ff6b6b)}
 .ddz-card.joker .ddz-rank{font-size:11px}
 .ddz-card.joker.big{color:var(--dsw-alias-state-warn-primary,#ffcf5c)}
 .ddz-card.sel{transform:translateY(-10px);border-color:var(--dsw-alias-brand-primary,#4a7dff);
   box-shadow:0 0 0 2px var(--dsw-alias-brand-primary,#4a7dff),0 8px 18px rgba(0,0,0,.32)}
-.ddz-card.mini{width:26px;height:36px}
+.ddz-card.mini{width:24px;height:34px;padding:1px 0 0 3px}
 .ddz-card.mini .ddz-rank{font-size:11px}
-.ddz-card.mini .ddz-suit{font-size:9px}
+.ddz-card.mini .ddz-suit{font-size:9px;margin-top:0}
 
 .ddz-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:17px;letter-spacing:.14em;font-weight:700}
-.ddz-urls{display:flex;flex-direction:column;gap:3px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
-.ddz-urls code{background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.06));padding:2px 6px;border-radius:5px;
-  cursor:pointer;word-break:break-all;transition:background .15s ease}
-.ddz-urls code:hover{background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.1))}
-.ddz-share{font-size:12px;padding:7px 9px;border-radius:8px;word-break:break-all;
-  background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.06));border:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.12))}
+/* Room setup: one folded strip. During a hand the table is what matters; in the
+   lobby the strip is open, because that is where a room gets filled. */
+.ddz-room{border-radius:10px;overflow:hidden;
+  border:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.10));
+  background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.04))}
+.ddz-room-head{display:flex;align-items:center;gap:6px;width:100%;padding:6px 9px;box-sizing:border-box;
+  font:inherit;font-size:12px;cursor:pointer;text-align:left;background:transparent;color:inherit;border:0;
+  transition:background .15s ease}
+.ddz-room-head:hover{background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.07))}
+.ddz-room-head:focus-visible{outline:2px solid var(--dsw-alias-label-primary,#eee);outline-offset:-2px}
+.ddz-room-title{font-weight:600;white-space:nowrap}
+.ddz-room-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-weight:700;
+  letter-spacing:.1em;padding:1px 6px;border-radius:6px;
+  background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.10))}
+.ddz-room-addr{font-size:11px;color:var(--dsw-alias-label-secondary,#9aa);
+  font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}
+.ddz-room-body{padding:2px 9px 9px;display:flex;flex-direction:column;gap:7px;
+  border-top:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.10))}
+.ddz-share-block{display:flex;flex-direction:column;gap:5px;padding-top:2px}
+.ddz-where{align-items:center}
+.ddz-url{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;padding:2px 6px;border-radius:5px;
+  cursor:pointer;background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.08));
+  border:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.12));color:inherit;white-space:nowrap;
+  transition:background .15s ease}
+.ddz-url:hover{background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.14))}
 .ddz-tabs{display:flex;gap:4px}
 .ddz-tabs button{flex:1;padding:4px 0;font:inherit;font-size:12px;cursor:pointer;border-radius:7px;
   background:transparent;color:var(--dsw-alias-label-secondary,#9aa);border:1px solid transparent;
@@ -155,7 +254,7 @@ module.exports = `
 /* Keyboard users get a ring that follows the theme instead of the browser's
    default, which can vanish on a themed surface. */
 .ddz-pill:focus-visible,.ddz-btn:focus-visible,.ddz-ico-btn:focus-visible,.ddz-tabs button:focus-visible,
-.ddz-chips button:focus-visible,.ddz-card:focus-visible,.ddz-urls code:focus-visible{outline:2px solid var(--dsw-alias-label-primary,#eee);outline-offset:2px}
+.ddz-chips button:focus-visible,.ddz-card:focus-visible,.ddz-url:focus-visible{outline:2px solid var(--dsw-alias-label-primary,#eee);outline-offset:2px}
 
 /* Thin, theme-coloured scrollbars in the two scrolling panes. */
 .ddz-mini-body,.ddz-view{scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l2,rgba(255,255,255,.22)) transparent}
@@ -165,7 +264,7 @@ module.exports = `
 .ddz-mini-body::-webkit-scrollbar-track,.ddz-view::-webkit-scrollbar-track{background:transparent}
 
 @media (prefers-reduced-motion: reduce){
-  .ddz-pill,.ddz-btn,.ddz-ico-btn,.ddz-card,.ddz-seat,.ddz-tabs button,.ddz-chips button,.ddz-input,.ddz-select{transition:none}
+  .ddz-pill,.ddz-btn,.ddz-ico-btn,.ddz-card,.ddz-seat-card,.ddz-meter-fill,.ddz-tabs button,.ddz-chips button,.ddz-input,.ddz-select{transition:none}
   .ddz-pill.turn .ddz-dot{animation:none}
   .ddz-pill:hover,.ddz-card:hover,.ddz-card.sel,.ddz-card:active,.ddz-btn:active:not(:disabled){transform:none}
 }

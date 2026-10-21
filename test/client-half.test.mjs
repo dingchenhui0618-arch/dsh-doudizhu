@@ -417,9 +417,13 @@ test('apply installs the stylesheet and a poller, and both are disposable', () =
     'dsh-doudizhu: styles',
   ])
   assert.equal(harness.styles.length, 1, '样式只注入一次')
-  assert.ok(harness.styles[0].textContent.includes('.ddz-mini'), '样式表里有浮窗的规则')
-  assert.ok(harness.styles[0].textContent.includes('--dsw-alias-bg-overlay'), '颜色走宿主主题令牌')
-  assert.ok(harness.styles[0].textContent.includes('pointer-events:auto'), '浮窗层是点击穿透的，条目要自己收回指针事件')
+  const css = harness.styles[0].textContent
+  assert.ok(css.includes('.ddz-mini'), '样式表里有浮窗的规则')
+  // Surfaces and text both come from the host's tokens, never from literal
+  // colours — the window must look native in either theme.
+  assert.ok(css.includes('--dsw-alias-bg-layer-2'), '颜色走宿主主题令牌')
+  assert.ok(css.includes('--dsw-alias-label-primary'), '文字色也走宿主令牌')
+  assert.ok(css.includes('pointer-events:auto'), '浮窗层是点击穿透的，条目要自己收回指针事件')
 
   harness.effects[1].dispose()
   assert.equal(harness.removals.length, 1, 'dispose 要把 <style> 摘掉')
@@ -618,9 +622,13 @@ test('a finished hand offers the next hand, names the winner, and reveals every 
     assert.ok(Array.isArray(info.hand), '结束后别人的手牌不再是 null')
     for (const id of info.hand) onScreen.add(id)
   }
-  for (const id of finished.bottom) onScreen.add(id)
   for (const id of finished.lastPlay.cards) onScreen.add(id)
   for (const id of onScreen) assert.ok(shown.has(cardLabel(id)), `${cardLabel(id)} 应该在画面上`)
+  // The bottom cards are shown as compact text next to the felt's title rather
+  // than as three more card faces — they are context, not something to beat.
+  for (const id of finished.bottom) {
+    assert.ok(text.includes(cardLabel(id)), `底牌 ${cardLabel(id)} 也要看得见`)
+  }
 })
 
 test('the conversation tab renders the same table without the window chrome', async () => {
@@ -634,7 +642,7 @@ test('the conversation tab renders the same table without the window chrome', as
   const text = textOf(nodes)
   assert.ok(text.includes('斗地主'))
   assert.ok(text.includes('AB12CD'))
-  assert.ok(text.includes('出牌记录'), '标签页把记录一并显示')
+  assert.ok(text.includes('出牌历史'), '标签页把记录一并显示')
   assert.ok(text.includes('房间事件'))
   assert.equal(hasClass(nodes, 'ddz-mini'), false, '标签页不是浮窗')
   assert.ok(hasClass(nodes, 'ddz-view'))
@@ -676,9 +684,9 @@ test('a host alone in the room can fill the table with computers', async () => {
   const harness = await mountMini(hosted(snapshot))
   let nodes = look(harness)
   assert.ok(textOf(nodes).includes('电脑'), '房主看得到电脑那一栏')
-  assert.equal(findButton(nodes, '撤下电脑'), null, '一个电脑都没上，就没有撤下一说')
+  assert.equal(findButton(nodes, '撤下'), null, '一个电脑都没上，就没有撤下一说')
 
-  const fill = findButton(nodes, '用电脑补齐空位')
+  const fill = findButton(nodes, '用电脑补齐')
   assert.ok(fill, '找到补齐按钮')
   assert.equal(fill.props.disabled, false, '一个人在场时补齐按钮能点')
 
@@ -693,7 +701,7 @@ test('a host alone in the room can fill the table with computers', async () => {
   nodes = look(harness)
   const hell = findButton(nodes, '地狱')
   assert.ok(hell, '四个强度都在')
-  assert.equal(findButton(nodes, '撤下电脑'), null, '一个电脑都没上，就没有撤下一说')
+  assert.equal(findButton(nodes, '撤下'), null, '一个电脑都没上，就没有撤下一说')
   hell.props.onClick()
   await harness.settle()
   assert.deepEqual(sentActions(harness).at(-1), { type: 'bots', level: 'hell', count: 0 })
@@ -704,7 +712,7 @@ test('only the host sees the computer controls, and the count is frozen mid-hand
   joinSeat(room, { name: '甲' })
   const guest = joinSeat(room, { name: '乙' })
   const asGuest = await mountMini(hosted(snapshotFor(room, guest.seat)))
-  assert.equal(findButton(look(asGuest), '用电脑补齐空位'), null, '客人不该看到房主的电脑按钮')
+  assert.equal(findButton(look(asGuest), '用电脑补齐'), null, '客人不该看到房主的电脑按钮')
   assert.equal(findButton(look(asGuest), '简单'), null, '连强度也不给客人看')
 
   // Mid-hand: the strength stays switchable, the number does not.
@@ -719,17 +727,109 @@ test('only the host sees the computer controls, and the count is frozen mid-hand
   assert.ok(snapshot.seats.some((info) => info.name === '电脑·中等'), '座位上是电脑的名字')
 
   const harness = await mountMini(hosted(snapshot))
-  const nodes = look(harness)
+  let nodes = look(harness)
   assert.ok(textOf(nodes).includes('电脑·中等'), '牌桌上看得出哪两个是电脑')
+  // 开局后房间设置先收起来：牌桌比邀请码更常看，但一下就能展开。
+  assert.equal(findButton(nodes, '地狱'), null, '局中房间设置默认收起')
+  const strip = nodes.find((node) => node.kind === 'element' && node.className.split(' ').includes('ddz-room-head'))
+  assert.ok(strip, '房间条要能展开')
+  strip.props.onClick()
+  nodes = look(harness)
+
   assert.ok(textOf(nodes).includes('在场 2 个'))
-  assert.equal(findButton(nodes, '撤下电脑').props.disabled, true, '局中撤不下电脑')
-  assert.equal(findButton(nodes, '再用电脑补齐').props.disabled, true, '已经坐满了，也不用再补')
+  assert.equal(findButton(nodes, '撤下').props.disabled, true, '局中撤不下电脑')
+  assert.equal(findButton(nodes, '补齐').props.disabled, true, '已经坐满了，也不用再补')
 
   const hell = findButton(nodes, '地狱')
   assert.equal(hell.props.disabled, false, '局中换强度仍可点')
   hell.props.onClick()
   await harness.settle()
   assert.deepEqual(sentActions(harness).at(-1), { type: 'bots', level: 'hell', count: 2 })
+})
+
+test('提示 and 帮我出 turn the legal-move engine into two buttons', async () => {
+  const { room } = seatedRoom()
+  room.game = placeBid(room.game, 0, 3).state
+  const harness = await mountMini(hosted(snapshotFor(room, 0)))
+  let nodes = look(harness)
+
+  const hint = findButton(nodes, '提示')
+  assert.ok(hint, '轮到自己出牌时要有提示按钮')
+  assert.equal(hint.props.disabled, false, '有牌可出时提示可用')
+  const help = findButton(nodes, '帮我出')
+  assert.ok(help, '还要有帮我出')
+  assert.equal(help.props.disabled, false, '有建议时帮我出可用')
+
+  // 提示 selects a suggestion. Which cards it picks is the engine's business;
+  // what matters here is that a legal selection lands in the hand.
+  assert.equal(findButton(nodes, '出牌').props.disabled, true, '没选牌时出牌还是灰的')
+  hint.props.onClick()
+  nodes = look(harness)
+  const selected = cardsIn(nodes).filter((card) => card.props['aria-pressed'] === 'true')
+  assert.ok(selected.length >= 1, `提示要选中一手牌，实际选了 ${selected.length} 张`)
+  assert.equal(findButton(nodes, '出牌').props.disabled, false, '选中后就能出')
+
+  // 帮我出 posts the suggested play straight to the authority.
+  const help2 = findButton(nodes, '帮我出')
+  help2.props.onClick()
+  await harness.settle(2)
+  const sent = sentActions(harness).at(-1)
+  assert.equal(sent.type, 'play', '帮我出要真的发出 play')
+  assert.ok(Array.isArray(sent.cards) && sent.cards.length >= 1, '带上了具体的牌')
+  for (const id of sent.cards) {
+    assert.ok(snapshotFor(room, 0).you.hand.includes(id), `${id} 必须在自己手上`)
+  }
+})
+
+test('改名 opens a box and posts the rename the room validates', async () => {
+  const { room } = seatedRoom()
+  const harness = await mountMini(hosted(snapshotFor(room, 0)))
+  let nodes = look(harness)
+
+  const open = findButton(nodes, '改名')
+  assert.ok(open, '座位上有改名入口')
+  open.props.onClick()
+  nodes = look(harness)
+
+  const input = nodes.find((node) => node.kind === 'element' && node.type === 'input'
+    && String(node.props.placeholder || '').includes('另外两家'))
+  assert.ok(input, '改名输入框出现了')
+
+  // Leading/trailing spaces are dropped by the shared normaliser, not by the room.
+  input.props.onChange({ target: { value: '  老王  ' } })
+  nodes = look(harness)
+  const save = findButton(nodes, '保存')
+  assert.ok(save, '有保存')
+  save.props.onClick()
+  await harness.settle(2)
+
+  assert.deepEqual(sentActions(harness).at(-1), { type: 'rename', name: '老王' })
+})
+
+test('出牌历史 is a folded strip on the table, and 不出 is part of the record', async () => {
+  const { room, tokens } = seatedRoom()
+  assert.ok(act(room, tokens[0], { type: 'bid', score: 3 }).ok)
+  const hand = snapshotFor(room, 0).you.hand
+  assert.ok(act(room, tokens[0], { type: 'play', cards: [hand[0]] }).ok)
+  assert.ok(act(room, tokens[1], { type: 'pass' }).ok)
+  assert.ok(act(room, tokens[2], { type: 'pass' }).ok)
+
+  const harness = await mountMini(hosted(snapshotFor(room, 0)))
+  let nodes = look(harness)
+
+  // Folded by default, but the summary still says how busy the hand has been.
+  assert.ok(textOf(nodes).includes('出牌历史'))
+  assert.ok(textOf(nodes).includes('本局 1 轮 · 3 手'), '收起时也要看得到打了多少手')
+  assert.equal(hasClass(nodes, 'ddz-history-body'), false, '默认不展开')
+
+  const head = nodes.find((node) => node.kind === 'element' && node.className.split(' ').includes('ddz-history-head'))
+  assert.ok(head, '折叠条要点得开')
+  head.props.onClick()
+  nodes = look(harness)
+
+  assert.ok(hasClass(nodes, 'ddz-history-body'), '展开后出现明细')
+  assert.ok(textOf(nodes).includes('不出'), '两家不出要留在历史里，不能只看见最后出的那手')
+  assert.ok(textOf(nodes).includes('乙'), '历史里要有出牌的人')
 })
 
 test('a snapshot that has not arrived yet still renders', async () => {

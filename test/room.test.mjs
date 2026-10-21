@@ -14,6 +14,7 @@ import { PHASES, bidSeat, checkPlay } from '../src/game.js'
 import { SEAT_COUNT, deckIds } from '../src/rules.js'
 import { seedRandom } from '../src/rng.js'
 import {
+  MAX_NAME,
   act,
   closeRoom,
   createRoom,
@@ -364,7 +365,7 @@ test('flags track the table once play starts', () => {
   assert.equal(view.lastPlay.seat, landlord)
   assert.equal(view.lastPlay.cards[0], weakest)
   assert.ok(view.lastPlay.move.label.length > 0)
-  assert.match(view.hint, /压过/)
+  assert.match(view.hint, /更大的牌/)
   assert.equal(view.plays.length, 1)
   assert.equal(view.plays[0].seat, landlord)
   assert.equal(view.seats[landlord].count, 19)
@@ -441,14 +442,131 @@ test('the lobby already shows the name a player chose', () => {
   assert.equal(snapshotFor(room, 2).you.name, '丙')
 })
 
-test('two seats can join with the same name without colliding', () => {
+test('两家同名入座会自动加序号，不会重名', () => {
   const room = freshRoom()
   const a = joinSeat(room, { name: '小明' })
   const b = joinSeat(room, { name: '小明' })
   assert.equal(a.seat, 0)
   assert.equal(b.seat, 1)
   assert.notEqual(a.token, b.token)
-  assert.equal(room.seats[0].name, room.seats[1].name)
+  assert.equal(room.seats[0].name, '小明')
+  assert.equal(room.seats[1].name, '小明 2', '第二家自动加序号，局域网两家才分得清')
   assert.equal(seatForToken(room, a.token), 0)
   assert.equal(seatForToken(room, b.token), 1)
+})
+
+test('重新连接时改的名字同样会去重', () => {
+  const room = freshRoom()
+  const tokens = seatThree(room)
+  setConnected(room, tokens[1], false)
+
+  const rejoin = joinSeat(room, { name: '甲', token: tokens[1] })
+  assert.ok(rejoin.ok, rejoin.error)
+  assert.equal(rejoin.rejoin, true)
+  assert.equal(room.seats[1].name, '甲 2', '重新连接撞上别人的名字也要加序号')
+  assert.equal(room.seats[0].name, '甲', '先到的人名字不动')
+  assert.equal(snapshotFor(room, 1).you.name, '甲 2')
+})
+
+test('改名同步到快照与日志，改成同一个名字不产生新变更', () => {
+  const room = freshRoom()
+  const tokens = seatThree(room)
+
+  const result = act(room, tokens[1], { type: 'rename', name: '张飞' })
+  assert.ok(result.ok, result.error)
+  assert.equal(result.seat, 1)
+  assert.equal(result.name, '张飞')
+
+  assert.equal(snapshotFor(room, 1).you.name, '张飞', '自己看到的 you.name 要同步')
+  assert.equal(snapshotFor(room, 0).seats[1].name, '张飞', '别人看到的座位名要同步')
+  assert.equal(room.game.players[1].name, '张飞', '牌局里的占位名也要跟着走')
+  const note = room.log.at(-1)?.note ?? ''
+  assert.match(note, /改名为/, '日志里要有改名记录')
+  assert.match(note, /张飞/)
+
+  const seq = room.seq
+  const logLength = room.log.length
+  const same = act(room, tokens[1], { type: 'rename', name: '张飞' })
+  assert.deepEqual(same, { ok: true, seat: 1, name: '张飞' }, '同名改名仍然返回 ok')
+  assert.equal(room.seq, seq, '名字没变就不算一次房间变更')
+  assert.equal(room.log.length, logLength, '名字没变就不写日志')
+})
+
+test('大厅和牌局进行中都能改名，改名不影响牌局', () => {
+  const room = freshRoom()
+  const first = joinSeat(room, { name: '甲' })
+  assert.equal(room.game.phase, PHASES.LOBBY)
+  assert.ok(act(room, first.token, { type: 'rename', name: '房主' }).ok)
+  assert.equal(snapshotFor(room, 0).you.name, '房主', '大厅阶段也要能改')
+
+  const tokens = [first.token, joinSeat(room, { name: '乙' }).token, joinSeat(room, { name: '丙' }).token]
+  assert.equal(room.game.phase, PHASES.BIDDING)
+  const during = act(room, tokens[2], { type: 'rename', name: '丙丙' })
+  assert.ok(during.ok, during.error)
+  assert.equal(snapshotFor(room, 0).seats[2].name, '丙丙')
+  assert.equal(room.game.phase, PHASES.BIDDING, '改名只是显示信息，不动牌局阶段')
+})
+
+test('改成别人正在用的名字会自动加序号，且总长不超过上限', () => {
+  const room = freshRoom()
+  const tokens = seatThree(room)
+
+  const collision = act(room, tokens[0], { type: 'rename', name: '乙' })
+  assert.ok(collision.ok, collision.error)
+  assert.equal(collision.name, '乙 2')
+  assert.equal(snapshotFor(room, 0).seats[0].name, '乙 2')
+  assert.equal(snapshotFor(room, 0).seats[1].name, '乙', '别人的名字不被改动')
+  assert.notEqual(snapshotFor(room, 0).seats[0].name, snapshotFor(room, 0).seats[1].name)
+
+  // 满长名字撞名：后缀占的字符从基数里扣，结果仍在 MAX_NAME 以内。
+  const long = '一二三四五六七八九十甲乙'
+  assert.equal([...long].length, MAX_NAME)
+  assert.ok(act(room, tokens[1], { type: 'rename', name: long }).ok)
+  const longCollision = act(room, tokens[2], { type: 'rename', name: long })
+  assert.ok(longCollision.ok, longCollision.error)
+  assert.equal([...longCollision.name].length <= MAX_NAME, true, '加后缀之后总长仍在上限内')
+  assert.match(longCollision.name, / 2$/)
+  assert.notEqual(longCollision.name, room.seats[1].name, '两家名字必须不同')
+})
+
+test('改名成空串回落到 玩家N', () => {
+  const room = freshRoom()
+  const tokens = seatThree(room)
+
+  const blank = act(room, tokens[2], { type: 'rename', name: '   ' })
+  assert.ok(blank.ok, blank.error)
+  assert.equal(blank.name, '玩家3', '全空白的名字回落到占位名，不能变成空名')
+  assert.equal(snapshotFor(room, 2).you.name, '玩家3')
+
+  const controlOnly = act(room, tokens[0], { type: 'rename', name: '\u0000\u0007' })
+  assert.ok(controlOnly.ok, controlOnly.error)
+  assert.equal(controlOnly.name, '玩家1', '只剩控制字符同样回落到占位名')
+})
+
+test('快照里的 turns 同时带着出牌与不出', () => {
+  const room = freshRoom()
+  const tokens = seatThree(room)
+  assert.ok(act(room, tokens[0], { type: 'bid', score: 3 }).ok)
+  assert.equal(room.game.phase, PHASES.PLAYING)
+
+  const landlord = room.game.toAct
+  const weakest = [...room.game.players[landlord].hand].at(-1)
+  assert.ok(act(room, tokens[landlord], { type: 'play', cards: [weakest] }).ok)
+  const next = room.game.toAct
+  assert.ok(act(room, tokens[next], { type: 'pass' }).ok)
+
+  const view = snapshotFor(room, 0)
+  assert.deepEqual(view.turns.map((turn) => turn.kind), ['play', 'pass'], '快照里按时间顺序给出流水')
+  assert.equal(view.turns[0].seat, landlord)
+  assert.deepEqual(view.turns[0].cards, [weakest])
+  assert.deepEqual(
+    Object.keys(view.turns[0].move).sort(),
+    ['isBomb', 'isRocket', 'label', 'mainValue', 'sequenceLength', 'size', 'type'],
+    '流水里的牌型只透出公开字段',
+  )
+  assert.deepEqual(view.turns[1], { seat: next, kind: 'pass', cards: [], move: null })
+  assert.equal(view.plays.length, 1, '不出不进 plays')
+
+  const clone = JSON.parse(JSON.stringify(view))
+  assert.deepEqual(clone.turns, view.turns, '流水是纯 JSON，往返不变')
 })

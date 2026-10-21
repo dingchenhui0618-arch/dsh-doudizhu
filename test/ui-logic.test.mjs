@@ -9,10 +9,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { PHASES, placeBid, playCards } from '../src/game.js'
-import { act, createRoom, joinSeat, snapshotFor } from '../src/room.js'
+import { act, createRoom, joinSeat, snapshotFor, MAX_NAME } from '../src/room.js'
 import { seedRandom } from '../src/rng.js'
 import { classifyMove } from '../src/rules.js'
 import {
+  MAX_NICK,
   MINI_H,
   MINI_W,
   activeSeat,
@@ -23,8 +24,12 @@ import {
   clampPosition,
   controlsFor,
   handForDisplay,
+  hintMoves,
+  historySummary,
   logEntries,
+  nicknameNote,
   normaliseAddress,
+  normaliseNickname,
   phaseLabel,
   playEntries,
   playError,
@@ -39,6 +44,7 @@ import {
   statusLine,
   suitSymbol,
   toggleSelection,
+  turnGroups,
 } from '../src/ui-logic.js'
 
 function liveRoom(seed = 4242) {
@@ -311,7 +317,17 @@ test('an address box value becomes something fetch accepts', () => {
 })
 
 test('stored preferences survive nonsense and are capped', () => {
-  const base = { x: null, y: null, collapsed: false, pane: 'table', name: '', botLevel: 'medium' }
+  const base = {
+    x: null,
+    y: null,
+    collapsed: false,
+    pane: 'table',
+    name: '',
+    botLevel: 'medium',
+    lastAddress: '',
+    lastCode: '',
+    historyOpen: false,
+  }
   assert.deepEqual(prefsFrom(null), base)
   assert.deepEqual(prefsFrom('nonsense'), base)
   assert.deepEqual(prefsFrom({ x: 10.6, y: -4, collapsed: true, pane: 'log', name: ' 小明 ' }), {
@@ -321,7 +337,21 @@ test('stored preferences survive nonsense and are capped', () => {
     pane: 'log',
     name: '小明',
     botLevel: 'medium',
+    lastAddress: '',
+    lastCode: '',
+    historyOpen: false,
   })
+
+  // The LAN address and code are remembered so a guest does not retype them.
+  // Both are capped and normalised: a pasted blob must not land in the box, and
+  // a lowercase code should come back uppercase.
+  assert.equal(prefsFrom({ lastAddress: ' 192.168.1.50:8791 ' }).lastAddress, '192.168.1.50:8791')
+  assert.equal(prefsFrom({ lastAddress: 'x'.repeat(200) }).lastAddress.length, 64)
+  assert.equal(prefsFrom({ lastCode: ' ab12cd ' }).lastCode, 'AB12CD')
+  assert.equal(prefsFrom({ lastCode: 'A-B_12！！' }).lastCode, 'AB12', '非字母数字直接剥掉')
+  assert.equal(prefsFrom({ lastCode: 'abcdefghijk' }).lastCode.length, 8)
+  assert.equal(prefsFrom({ historyOpen: 'yes' }).historyOpen, false, 'historyOpen 只认真正的 true')
+  assert.equal(prefsFrom({ historyOpen: true }).historyOpen, true)
   assert.equal(prefsFrom({ x: 'abc' }).x, null)
   assert.equal(prefsFrom({ pane: 'evil' }).pane, 'table')
   assert.equal(prefsFrom({ collapsed: 'yes' }).collapsed, false, 'only a real true counts')
@@ -460,3 +490,107 @@ test('the play history names the player, the shape, and the cards', () => {
     { key: 'p0', who: '座位10', cards: '', shape: '', text: '座位10 不出' },
   ])
 })
+
+test('nickname: the box and the room agree on the cap, and the note tells the truth', () => {
+  // The room keeps MAX_NAME code points. If the box accepted more, the name
+  // would silently shrink on the other two machines and nobody would know why.
+  assert.equal(MAX_NICK, MAX_NAME, '输入框上限必须等于房间上限')
+
+  assert.equal(normaliseNickname('  张飞  '), '张飞')
+  assert.equal(normaliseNickname('张\u0000飞\u007f'), '张飞', '控制字符要剥掉')
+  assert.equal(normaliseNickname(null), '')
+  assert.equal([...normaliseNickname('张'.repeat(30))].length, MAX_NICK, '按码点截断')
+
+  // A surrogate pair is two UTF-16 units but one character: the cap counts the
+  // character, otherwise a rocket emoji would eat two of the twelve slots.
+  const emoji = '🚀'.repeat(20)
+  assert.equal([...normaliseNickname(emoji)].length, MAX_NICK)
+  assert.equal(normaliseNickname(emoji).length, MAX_NICK * 2)
+
+  assert.equal(nicknameNote('', { seat: 2 }), '留空就叫「玩家3」')
+  assert.equal(nicknameNote('   ', { seat: 0 }), '留空就叫「玩家1」')
+  assert.match(nicknameNote('张飞'), /「张飞」/)
+  assert.match(nicknameNote('张飞', { taken: ['张飞'] }), /同名/)
+})
+
+test('hint: every suggestion is a legal move the authority would accept', () => {
+  const room = liveRoom()
+  bid(room, 0, 3)
+  const snapshot = snapshotFor(room, 0)
+  const hand = snapshot.you.hand
+  const hints = hintMoves(snapshot)
+
+  assert.ok(hints.length > 0, '先手必须给得出建议')
+  for (const hint of hints) {
+    for (const id of hint.cards) assert.ok(hand.includes(id), `建议里有不在手上的牌 ${id}`)
+    assert.ok(classifyMove(hint.cards), `建议不是合法牌型: ${hint.cards.join(' ')}`)
+  }
+  // No duplicates: two entries with the same cards would make 提示 look broken.
+  const seen = new Set(hints.map((hint) => [...hint.cards].sort().join('|')))
+  assert.equal(seen.size, hints.length, '同一手牌只出现一次')
+
+  assert.deepEqual(hintMoves({ you: { hand: [] } }), [], '没牌就没建议')
+  assert.deepEqual(hintMoves(null), [])
+})
+
+test('hint: finishing the hand comes first, spending a bomb comes last', () => {
+  // Synthetic snapshots keep the assertion about the ranking, not about luck.
+  const finish = hintMoves({ you: { hand: ['S3'] }, lastPlay: null })
+  assert.equal(finish[0].finishing, true, '能一把走完就必须排第一')
+  assert.deepEqual(finish[0].cards, ['S3'])
+  assert.equal(finish[0].note, '一把走完')
+
+  const bombHand = ['S5', 'H5', 'D5', 'C5', 'S7', 'H8']
+  const lead = hintMoves({ you: { hand: bombHand }, lastPlay: null }, { limit: 20 })
+  assert.ok(lead.length > 0)
+  assert.notEqual(lead[0].label, '炸弹', '有普通牌可出时，第一建议不该是炸弹')
+  const bombAt = lead.findIndex((hint) => hint.label === '炸弹')
+  const plainAt = lead.findIndex((hint) => hint.label === '单张')
+  assert.ok(plainAt >= 0 && (bombAt === -1 || plainAt < bombAt), '炸弹排在普通牌之后')
+
+  // Following: only cards that actually beat the table may appear.
+  const target = { move: classifyMove(['D5']) }
+  const followHand = ['S3', 'H4', 'S9', 'H9']
+  const follow = hintMoves({ you: { hand: followHand }, lastPlay: target })
+  assert.ok(follow.length > 0, '手里有 9 就压得过 5')
+  for (const hint of follow) {
+    for (const id of hint.cards) assert.notEqual(id, 'S3', '压不过 5 的牌不该被建议')
+    for (const id of hint.cards) assert.notEqual(id, 'H4', '压不过 5 的牌不该被建议')
+  }
+})
+
+test('history: grouped by trick, and a pass is part of the record', () => {
+  const seats = [{ seat: 0, name: '甲' }, { seat: 1, name: '乙' }, { seat: 2, name: '丙' }]
+  const single = { type: 'single', size: 1, mainValue: 5, label: '单张' }
+  const snapshot = {
+    seats,
+    turns: [
+      { seat: 0, kind: 'play', cards: ['D5'], move: single },
+      { seat: 1, kind: 'pass', cards: [], move: null },
+      { seat: 2, kind: 'pass', cards: [], move: null },
+      { seat: 0, kind: 'play', cards: ['D9'], move: { ...single, mainValue: 9 } },
+      { seat: 1, kind: 'play', cards: ['DJ'], move: { ...single, mainValue: 11 } },
+    ],
+  }
+  const groups = turnGroups(snapshot)
+
+  // Two passes in a row hand the lead back, so the fourth turn opens a new trick.
+  assert.equal(groups.length, 2)
+  assert.deepEqual(groups[0].items.map((item) => item.kind), ['play', 'pass', 'pass'])
+  assert.equal(groups[0].items[0].lead, true, '第一手是本轮领出')
+  assert.equal(groups[0].items[1].lead, false)
+  assert.equal(groups[0].items[1].text, '不出')
+  assert.deepEqual(groups[1].items.map((item) => item.name), ['甲', '乙'])
+  assert.equal(groups[1].index, 2)
+  assert.match(groups[0].items[0].text, /5/, '历史里要看得见牌面')
+
+  assert.equal(historySummary(snapshot), '本局 2 轮 · 5 手')
+  assert.equal(historySummary({ seats, turns: [] }), '本局还没有人出牌')
+
+  // A 0.1.x authority only ships `plays`: render what it has instead of nothing.
+  const old = turnGroups({ seats, plays: [{ seat: 1, cards: ['S3'], move: single }] })
+  assert.equal(old.length, 1)
+  assert.equal(old[0].items[0].name, '乙')
+  assert.deepEqual(turnGroups(null), [])
+})
+
