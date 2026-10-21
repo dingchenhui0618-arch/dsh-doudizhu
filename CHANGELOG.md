@@ -40,6 +40,14 @@
 
 单测 173 → **179**（+4 电脑调度、+1 host、+1 展示逻辑）。
 
+### 这一版发到哪了
+
+| 通道 | 坐标 | 校验 |
+| --- | --- | --- |
+| GitHub Release | `v0.2.2`，asset `dsh-doudizhu-0.2.2.tgz`，84425 字节 | sha256 `2a66e1f59b6f85054507e78a85d20c935a2bcc95a44a74211ab733e049860066`，本地/asset/下载回来三处一致 |
+| npm | `@dingchenhui/dsh-doudizhu@0.2.2`（`latest`） | shasum `3e50d6d049a28e36b7661b59f224f834ff99daf2`；装回来验过：包名、patch 引用名、`lib/index.js` 的 `name`/`inject`，以及 `lib` 里确实带着这一版的修复 |
+| 插件市场 | 条目 tarball 指到 v0.2.2 + 说明改成 179 个测试 | PR [#8397](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8397) 就地更新 |
+
 ## [0.2.1] - 2026-10-21
 
 ### npm 通道改用 scope 名：`@dingchenhui/dsh-doudizhu`
