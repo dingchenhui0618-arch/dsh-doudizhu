@@ -300,6 +300,12 @@ async function main() {
               const pjPath = join(publishDir, 'package.json')
               const staged = JSON.parse(readFileSync(pjPath, 'utf8'))
               staged.name = name
+              // 打包产物里没有 scripts/，`prepack` 会在暂存目录里跑一次 build 然后失败。
+              // tarball 里已经带着构建好的 lib/，发布时不需要再跑生命周期脚本。
+              if (staged.scripts) {
+                delete staged.scripts.prepack
+                delete staged.scripts.prepare
+              }
               writeFileSync(pjPath, JSON.stringify(staged, null, 2) + '\n')
               const patchPath = join(publishDir, 'cordis.patch.yml')
               if (existsSync(patchPath)) {
@@ -312,9 +318,19 @@ async function main() {
           if (!FAILED.includes('npm')) {
             const published = npm(['publish', '--access', 'public'], { dry, cwd: publishDir })
             if (!published.ok) {
-              warn('npm publish 失败，原文见上。常见原因：未登录 / 2FA / 包名被占 / 版本已存在')
-              BLOCKED.push('npm：publish 失败')
-              results.push({ step: 'npm', status: 'blocked', why: 'publish 失败' })
+              if (/EOTP|one-time password/i.test(published.out)) {
+                // 2FA 刷卡这一步自动化不了：npm 要在能等的终端里打开浏览器、等你按一下安全密钥。
+                warn('npm 要 2FA：publish 必须在一个能等你的终端里跑，脚本这种非交互调用等不了。')
+                warn('在一个真终端窗口里贴这两行（浏览器会弹出来，按一下安全密钥即可）：')
+                warn(`  cd "${publishDir}"`)
+                warn('  npm publish --access public')
+                BLOCKED.push('npm：publish 需要 2FA（跑一次上面的命令）')
+                results.push({ step: 'npm', status: 'blocked', why: '2FA 需要交互终端' })
+              } else {
+                warn('npm publish 失败，原文见上。常见原因：未登录 / 2FA / 包名被占 / 版本已存在')
+                BLOCKED.push('npm：publish 失败')
+                results.push({ step: 'npm', status: 'blocked', why: 'publish 失败' })
+              }
             } else {
               npmPublished = true
               note(`${name}@${version} 已发布`)

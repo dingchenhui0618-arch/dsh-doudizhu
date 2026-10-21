@@ -23,6 +23,16 @@
 自己的 `lib/`，插件会静默不挂载。脚本不再把 `--npm-name` 当成只影响提示装饰的参数（上一版
 就是这么写的：它打印 scope 名，然后照样 `npm publish` 原名，必然 403）。
 
+**实际发出去的**：`@dingchenhui/dsh-doudizhu@0.2.1`，`latest`，shasum
+`cd39856fc27b9aaeca817d8b667cd29e96095736`。从 npm 装出来验过三件事：安装目录是
+`node_modules/@dingchenhui/dsh-doudizhu`、`cordis.patch.yml` 里引用名是 `@dingchenhui/dsh-doudizhu`、
+`lib/index.js` 导出 `name = "dsh-doudizhu"` / `inject = ["webServer"]` / `apply` 是函数。
+包里那个 `0.0.0-stage` 是 npm 为 staged publishing 自建的占位版本，不是这一版的内容。
+
+**2FA 这条边界要说清**：`npm publish` 在非交互的脚本里必然 `EOTP`——脚本现在的做法是
+打印两行给人在真终端里贴，并按约定标 `⛔ BLOCKED`，不假装成功；真终端里 npm 会自己把浏览器
+弹出来，按一下 passkey（Google 密码管理器里那个，点 Continue）就继续发。
+
 ## [0.2.0] - 2026-10-21
 
 ### 界面：从「能打」到「一眼看懂」

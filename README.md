@@ -615,6 +615,22 @@ node scripts/release.mjs                   # 再跑一次：npm 那步补上，�
 > npm 只是第二条安装通道：市场的 `probe-npm.mjs` 靠**包里的 `repository` 字段**指回同一个
 > 仓库才会认领它，所以 `package.json` 里那几个字段不是装饰。
 
+**已经发出去的一版**：`@dingchenhui/dsh-doudizhu@0.2.1`（`latest`，shasum
+`cd39856fc27b9aaeca817d8b667cd29e96095736`）。从 npm 装出来验过：目录名
+`node_modules/@dingchenhui/dsh-doudizhu`、`cordis.patch.yml` 里引用名是同名 scope、
+`lib/index.js` 导出 `name = "dsh-doudizhu"` / `inject = ["webServer"]` / `apply` 是函数。
+包里还留着一个 `0.0.0-stage`——那是 npm 自己为 staged publishing 建的占位版本，不是我们发的。
+
+> **这条通道有一处自动化不了**：npm 的 `publish` 要 2FA。脚本（非交互）发到这里会拿到
+> `EOTP`，然后打印两行让你在真终端里贴——浏览器弹出来、按一下安全密钥（passkey 存在
+> Google 密码管理器里，点 Continue 即可），publish 才继续。脚本不会假装成功，它标
+> `⛔ BLOCKED` 并给出那两行命令；发成功后其余步骤照样全绿：
+>
+> ```sh
+> node scripts/release.mjs --npm-name @dingchenhui/dsh-doudizhu   # npm 那步 BLOCKED
+> cd _tmp/npm-stage/package && npm publish --access public        # 在真终端里跑，按 passkey
+> ```
+
 ## 许可
 
 MIT。规则层移植自 [Aevi 家庭斗地主](https://github.com/AurexloveU/doudizhu)（MIT，
