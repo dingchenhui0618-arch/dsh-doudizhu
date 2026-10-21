@@ -57,12 +57,17 @@ const REQUIRED_IGNORES = ['node_modules/', '.env', '*.pem', '*.key', '_tmp/', '*
 
 // --------------------------------------------------------------- 3. scratch --
 
+// Screenshots that the README shows on purpose are deliverables, not scratch: the
+// plugin's acceptance standard is "real rendered pixels in the repo". Anything
+// outside docs/ is still refused.
+const DOC_IMAGES = /^docs\/[a-z0-9-]+\.png$/
+
 const SCRATCH_PATTERNS = [
   [/(^|\/)_tmp\//, 'lives under _tmp/'],
   [/(^|\/)node_modules\//, 'is a dependency dump'],
   [/\.tgz$/, 'is a packed artifact (release assets do not belong in the tree)'],
   [/\.log$/, 'is a log'],
-  [/\.(png|jpg|jpeg|webp)$/, 'is an image'],
+  [/\.(png|jpg|jpeg|webp)$/, 'is an image', DOC_IMAGES],
 ]
 
 function trackedFiles() {
@@ -89,8 +94,8 @@ for (const file of files) {
       }
     }
   })
-  for (const [pattern, why] of SCRATCH_PATTERNS) {
-    if (pattern.test(file)) problems.push(`${file} ${why}`)
+  for (const [pattern, why, allow] of SCRATCH_PATTERNS) {
+    if (pattern.test(file) && !(allow && allow.test(file))) problems.push(`${file} ${why}`)
   }
 }
 
