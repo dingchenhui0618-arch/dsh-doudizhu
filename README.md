@@ -383,8 +383,11 @@ DSH 自己的 Web 认证**不覆盖插件用 `ctx.webServer.register` 挂的 pre
 （所以这个仓库的 `.gitignore` 故意**不**忽略 `lib/`）。把这一行地址交给 DSH 的插件管理器：
 
 ```
-https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.1.5/dsh-doudizhu-0.1.5.tgz
+https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.2.0/dsh-doudizhu-0.2.0.tgz
 ```
+
+（npm 上另有一条通道，**包名带 scope**：`@dingchenhui/dsh-doudizhu`。不带 scope 的
+`dsh-doudizhu` 在 npm 上被别的人用 `0.0.0` 占着，不能发，详见「发布」一节。）
 
 三条路都通向同一个动作，挑顺手的：
 
@@ -583,7 +586,7 @@ node scripts/release.mjs --market      # 真发：npm + tag/push + GitHub Releas
 | preflight | 版本 / 分支 / 工作区 / CHANGELOG / 单测 / pre-push 三步 | 任何一项不过就停 |
 | build | 重建 `lib/` | esbuild 的输出 |
 | pack | `npm pack` + sha256 | 包内 `package.json` 的版本 == 目标版本 |
-| npm | `npm publish --access public` | `npm view <name>@<ver>` 查得到 |
+| npm | `npm publish --access public`（`--npm-name` 时发解包改名的那份） | `npm view <name>@<ver>` 查得到 |
 | git | 打 tag、推 main 与 tag | `git ls-remote` 查得到 tag |
 | release | `gh release create`，notes 由 CHANGELOG 那一节生成 | asset 的 digest == 本地 sha256 |
 | market | 市场条目换 tarball 与用例数；有同分支 PR 就地更新，否则从 main 起新分支开 PR | 条目指着这一版 |
@@ -597,10 +600,17 @@ npm login                                  # 或把带 publish 权限的 granula
 node scripts/release.mjs                   # 再跑一次：npm 那步补上，已完成的两步自动跳过
 ```
 
-> **npm 上的 `dsh-doudizhu` 现在归 `awesomehou`**（2026-08-18 用 `0.0.0` 占位包占的，
-> 描述写着"Will be replaced by the real package"）。脚本发布前会查维护者：不是你的账号
-> 就不硬发（必然 403），而是提示改用 scope 名——
-> `node scripts/release.mjs --npm-name @<你的 npm 账号>/dsh-doudizhu`。
+> **npm 上的 `dsh-doudizhu` 归 `awesomehou`**（2026-08-18 用 `0.0.0` 占位包占的，
+> 描述写着"Will be replaced by the real package"）。0.2.1 起 **npm 通道改用 scope 名**：
+>
+> ```sh
+> node scripts/release.mjs --npm-name @dingchenhui/dsh-doudizhu
+> ```
+>
+> 发的是打包之后**解包再改名**的那份：内容与 GitHub asset 逐字节相同，只改 `package.json`
+> 的 `name` 和 `cordis.patch.yml` 里的引用名（两处必须一起改，否则 scoped 装完 patch 指不回
+> 自己的 `lib/`，插件会静默不挂载）。GitHub Release 那条通道保持不带 scope 的原名不动，
+> 两条通道互不影响。
 > 市场条目的 `tarball` 必须留在 GitHub Release（市场只收 GitHub 托管的 tarball），
 > npm 只是第二条安装通道：市场的 `probe-npm.mjs` 靠**包里的 `repository` 字段**指回同一个
 > 仓库才会认领它，所以 `package.json` 里那几个字段不是装饰。

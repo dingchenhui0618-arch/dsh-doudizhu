@@ -261,33 +261,65 @@ async function main() {
     } else {
       const me = who.out.trim().split('\n').pop()
       if (!dry) note(`已登录 npm 账号 ${me}`)
-      // 包名归属：别人先占了就退回 scope 名，别浪费一轮失败。
-      const owner = probe('npm', ['view', pkg.name, 'maintainers', '--json'], { shell: process.platform === 'win32' })
-      const maintainers = owner.ok ? (() => { try { const parsed = JSON.parse(owner.out); return Array.isArray(parsed) ? parsed.map((m) => m.name ?? m) : [] } catch { return [] } })() : []
-      let name = args.npmName ?? pkg.name
-      if (!args.npmName && maintainers.length && !maintainers.includes(me)) {
-        name = `${pkg.name}`
-        warn(`npm 上的 ${pkg.name} 归 ${maintainers.join(', ')}，不是你（${me}）`)
-        warn(`  要么让它转给你，要么用 scope 发：--npm-name @${me}/${pkg.name}`)
-        BLOCKED.push(`npm：包名 ${pkg.name} 被 ${maintainers.join(', ')} 占着`)
-        results.push({ step: 'npm', status: 'blocked', why: `包名被 ${maintainers.join(', ')} 占用` })
-      } else {
-        npmName = name
+      const name = args.npmName ?? pkg.name
+      npmName = name
+      // 包名归属：别人先占了就退回 scope 名，别浪费一轮失败。只有发不带 scope 的原名时
+      // 才需要问这一句——scope 名下不可能有别人的包。
+      if (!args.npmName) {
+        const owner = probe('npm', ['view', pkg.name, 'maintainers', '--json'], { shell: process.platform === 'win32' })
+        const maintainers = owner.ok ? (() => { try { const parsed = JSON.parse(owner.out); return Array.isArray(parsed) ? parsed.map((m) => m.name ?? m) : [] } catch { return [] } })() : []
+        if (maintainers.length && !maintainers.includes(me)) {
+          warn(`npm 上的 ${pkg.name} 归 ${maintainers.join(', ')}，不是你（${me}）`)
+          warn(`  要么让它转给你，要么用 scope 发：--npm-name @${me}/${pkg.name}`)
+          BLOCKED.push(`npm：包名 ${pkg.name} 被 ${maintainers.join(', ')} 占着`)
+          results.push({ step: 'npm', status: 'blocked', why: `包名被 ${maintainers.join(', ')} 占用` })
+        }
+      }
+      if (!BLOCKED.length) {
         const existing = probe('npm', ['view', `${name}@${version}`, 'version'], { shell: process.platform === 'win32' })
         if (existing.ok && existing.out.includes(version)) {
           note(`${name}@${version} 已经在 npm 上，跳过发布（只校验）`)
           npmPublished = true
           results.push({ step: 'npm', status: 'done', name, version, already: true })
         } else {
-          const published = npm(['publish', '--access', 'public'], { dry })
-          if (!published.ok) {
-            warn('npm publish 失败，原文见上。常见原因：未登录 / 2FA / 包名被占 / 版本已存在')
-            BLOCKED.push('npm：publish 失败')
-            results.push({ step: 'npm', status: 'blocked', why: 'publish 失败' })
-          } else {
-            npmPublished = true
-            note(`${name}@${version} 已发布`)
-            results.push({ step: 'npm', status: 'done', name, version })
+          // 用的是另一个名字（scope）时，发的是**解包出来再改名字**的那份：内容与 GitHub
+          // asset 逐字节相同，只改 package.json 的 name 和 patch 里的引用名，两处必须一起改，
+          // 否则 scoped 安装后 bundle patch 指不回自己的 lib/。
+          let publishDir = ROOT
+          if (name !== pkg.name) {
+            const stage = join(TMP, 'npm-stage')
+            rmSync(stage, { recursive: true, force: true })
+            mkdirSync(stage, { recursive: true })
+            const untar = sh('tar', ['-xzf', tarball, '-C', stage])
+            if (!untar.ok) {
+              warn('解不开刚打出来的 tarball，没发。')
+              FAILED.push('npm')
+              results.push({ step: 'npm', status: 'failed' })
+            } else {
+              publishDir = join(stage, 'package')
+              const pjPath = join(publishDir, 'package.json')
+              const staged = JSON.parse(readFileSync(pjPath, 'utf8'))
+              staged.name = name
+              writeFileSync(pjPath, JSON.stringify(staged, null, 2) + '\n')
+              const patchPath = join(publishDir, 'cordis.patch.yml')
+              if (existsSync(patchPath)) {
+                writeFileSync(patchPath, readFileSync(patchPath, 'utf8')
+                  .replace(/^(\s*name:\s*)dsh-doudizhu\s*$/gm, `$1${name}`))
+              }
+              note(`暂存目录 ${rel(publishDir)}（包名与 patch 引用改成 ${name}）`)
+            }
+          }
+          if (!FAILED.includes('npm')) {
+            const published = npm(['publish', '--access', 'public'], { dry, cwd: publishDir })
+            if (!published.ok) {
+              warn('npm publish 失败，原文见上。常见原因：未登录 / 2FA / 包名被占 / 版本已存在')
+              BLOCKED.push('npm：publish 失败')
+              results.push({ step: 'npm', status: 'blocked', why: 'publish 失败' })
+            } else {
+              npmPublished = true
+              note(`${name}@${version} 已发布`)
+              results.push({ step: 'npm', status: 'done', name, version })
+            }
           }
         }
       }

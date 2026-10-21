@@ -5,6 +5,24 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-21
+
+### npm 通道改用 scope 名：`@dingchenhui/dsh-doudizhu`
+
+不带 scope 的 `dsh-doudizhu` 在 npm 上归 `awesomehou`（2026-08-18 的 `0.0.0` 占位包），
+所以这个仓库的名字发不上去。0.2.1 起 npm 这条通道走 scope 名，**GitHub Release 那条不变**：
+
+| 通道 | 名字 | 装出来长什么样 |
+| --- | --- | --- |
+| GitHub Release tarball（市场用这条） | `dsh-doudizhu` | `node_modules/dsh-doudizhu`，`cordis.patch.yml` 用包名引用自己 |
+| npm | `@dingchenhui/dsh-doudizhu` | `node_modules/@dingchenhui/dsh-doudizhu` |
+
+`node scripts/release.mjs --npm-name @dingchenhui/dsh-doudizhu` 发的是**解包后改名的那一份**：
+解出来的内容与 GitHub asset 逐字节相同，只改两处——`package.json` 的 `name`，以及
+`cordis.patch.yml` 里那行引用名。两处必须一起改，否则 scoped 装完之后 bundle patch 指不回
+自己的 `lib/`，插件会静默不挂载。脚本不再把 `--npm-name` 当成只影响提示装饰的参数（上一版
+就是这么写的：它打印 scope 名，然后照样 `npm publish` 原名，必然 403）。
+
 ## [0.2.0] - 2026-10-21
 
 ### 界面：从「能打」到「一眼看懂」
