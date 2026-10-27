@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### 文档与工程
+
+- **`SECURITY.md`**：照 `dsh-rewind` 的规格写的安全模型——信任边界（局域网端口 / 本机回环路由）、
+  座位 token 与房间码各自的真实定位、输入处理（64 KiB 上限、牌 id 只在权威校验）、不碰文件系统、
+  六条已知限制、以及明确不算漏洞的清单。写的时候照实写了最难写的一条：**房间码是碰头把手不是门禁**
+  （`GET /hello` 公开它，`POST /join` 不带也能入座），要不要做成真门禁是 0.3 的设计题。
+- **`.github/workflows/ci.yml`**：`ubuntu-latest` × `windows-latest` × node 22/24 四组，跑
+  build、`lib/` 与 `src/` 是否一致（提交了 `lib/`，不一致说明忘了 rebuild）、179 个单测、推送前检查。
+  首次运行四组全绿。
+- **README 顶部**：CI / npm 版本 / 许可证三个 badge（下载量 badge 撤了——shields.io 对新包名
+  还返回 "package not found or too new"，不摆一个坏掉的图），并加了一行 star 引导：
+  插件市场的「搜插件」按 `dsh-plugin` topic + star 排序，star 是这个小插件唯一的曝光杠杆。
+
 ## [0.2.3] - 2026-10-27
 
 ### 换 npm 名：`dsh-doudizhu-lan`（功能与 0.2.2 完全一致）

@@ -2,7 +2,6 @@
 
 [![CI](https://github.com/dingchenhui0618-arch/dsh-doudizhu/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dingchenhui0618-arch/dsh-doudizhu/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/dsh-doudizhu-lan.svg)](https://www.npmjs.com/package/dsh-doudizhu-lan)
-[![downloads](https://img.shields.io/npm/dt/dsh-doudizhu-lan.svg)](https://www.npmjs.com/package/dsh-doudizhu-lan)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 > **这份代码是谁、装哪个包、现在什么版本 —— 先看这三行，名字撞车很常见。**
