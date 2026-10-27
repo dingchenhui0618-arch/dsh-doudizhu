@@ -88,6 +88,21 @@ jobs:
             console.log('staged', p.name + '@' + p.version)
           "
 
+      - name: Already on npm?
+        id: exists
+        shell: bash
+        run: |
+          dir='${{ steps.stage.outputs.dir }}'
+          name=$(node -p "require('$dir/package.json').name")
+          version=$(node -p "require('$dir/package.json').version")
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$name@$version is already published - nothing to do"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish with provenance
+        if: steps.exists.outputs.found == 'false'
         working-directory: ${{ steps.stage.outputs.dir }}
         run: npm publish --provenance --access public

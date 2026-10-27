@@ -5,6 +5,30 @@
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-10-27
+
+### npm 发布改由 CI 用 Trusted Publishing 发（不再需要 2FA、不再需要本机登录）
+
+这一版只动发布链路，**运行逻辑与 0.2.4 完全相同**（`lib/` 不变，179 个用例照旧全绿）。
+
+- **新增 `.github/workflows/publish.yml`**：推 `v*` tag（或手工 `workflow_dispatch`）后，GitHub
+  为本轮运行签发短期 OIDC token，npm 用它比对「这个包的 Trusted Publisher 配置」，通过后只给
+  这一条 `publish` 命令发临时凭据，并带上 provenance 签名。仓库里**没有 `NODE_AUTH_TOKEN`**，
+  也没有任何 secret。
+- **`release.mjs` 新增 `--stage-only`**：只做「解包 → 改名 `dsh-doudizhu-lan` → 去掉生命周期
+  脚本 → 改 `cordis.patch.yml` 引用名」并打印目录，由 CI 在该目录里 `npm publish --provenance`。
+  本地交互发布与 CI 现在共用同一段暂存逻辑，不会出现两份实现各自漂移。
+- **CI 里带版本幂等判断**：目标版本已经在 npm 上就打印 `::notice::` 并跳过 publish，tag 重跑
+  不会撞 `E409 cannot publish over previously published version`。
+- npm 上的信任关系已注册（`npm trust list dsh-doudizhu-lan` 可复核，id
+  `b209784b-cd85-4971-9983-401a5e30c378`：仓库 `dingchenhui0618-arch/dsh-doudizhu`、
+  workflow `publish.yml`、权限 `createPackage` + `createStagedPackage`）。注册本身要一次 2FA
+  且**必须用 npm 12**：npm 11.12.1 打同一个接口返回 400（payload 里没有权限字段）。
+- 上一版 README 里「这条通道有一处自动化不了（要按 passkey）」的说法已随这一版作废。
+
+- npm：`dsh-doudizhu-lan@0.2.5`
+- GitHub Release：`v0.2.5`
+
 ## [0.2.4] - 2026-10-27
 
 ### 文档进包：`SECURITY.md` 随 npm 包一起发

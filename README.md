@@ -7,7 +7,7 @@
 > **这份代码是谁、装哪个包、现在什么版本 —— 先看这三行，名字撞车很常见。**
 >
 > - 仓库：`dingchenhui0618-arch/dsh-doudizhu`（**三人局域网**斗地主，浮窗在 DeepSeek Harness 里打）
-> - npm 包名：**`dsh-doudizhu-lan`**（最新 `0.2.4`，`npm i dsh-doudizhu-lan`）。npm 上
+> - npm 包名：**`dsh-doudizhu-lan`**（最新 `0.2.5`，`npm i dsh-doudizhu-lan`）。npm 上
 >   **不带 scope** 的 `dsh-doudizhu` 是别人 2026-08-18 发的 `0.0.0` 占位包，**不是这个项目**；
 >   旧的 `@dingchenhui/dsh-doudizhu` 是本项目 0.2.1–0.2.2 用过的名字，已标 deprecated。
 >   GitHub 上还有 `lifefloating/dsh-doudizhu`、`AwesomeHou/dsh-doudizhu`、
@@ -20,7 +20,7 @@ DeepSeek Harness 的插件：**三人局域网斗地主**。三个人各自在�
 （简单 / 中等 / 困难 / 地狱）随时可换，一个人或两个人照样能打完整一局。
 
 > **当前进度：规则引擎、牌局状态机、权威房间服务与传输、DSH 插件两个半区（host + 浮窗/标签页
-> 客户端）、电脑玩家都已完成并有测试覆盖（179 个用例）；已开源推送（仓库 public、v0.2.4 已发布、
+> 客户端）、电脑玩家都已完成并有测试覆盖（179 个用例）；已开源推送（仓库 public、v0.2.5 已发布、
 > 终端 npm 与市场 PR 两条通道都打过）。只剩三机实机验收没跑——那需要另外两台真机器。**
 > 具体的完成边界见「进度」一节，不要按 README 的愿景当成已实现的能力。
 
@@ -405,7 +405,7 @@ DSH 自己的 Web 认证**不覆盖插件用 `ctx.webServer.register` 挂的 pre
 （所以这个仓库的 `.gitignore` 故意**不**忽略 `lib/`）。把这一行地址交给 DSH 的插件管理器：
 
 ```
-https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.2.4/dsh-doudizhu-0.2.4.tgz
+https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.2.5/dsh-doudizhu-0.2.5.tgz
 ```
 
 （npm 上另有一条通道，包名是 **`dsh-doudizhu-lan`**：`npm i dsh-doudizhu-lan`。为什么不用
@@ -598,9 +598,24 @@ node scripts/live-bots.mjs --level hell          # 1 真人 + 2 台地狱电脑
 ## 发布（维护者用）
 
 ```sh
-node scripts/release.mjs --dry-run     # 先看它打算做什么，一个字节都不改
-node scripts/release.mjs --market      # 真发：npm + tag/push + GitHub Release + 市场条目 PR
+node scripts/release.mjs --dry-run                    # 先看它打算做什么，一个字节都不改
+node scripts/release.mjs --skip npm --market          # 真发：tag/push + GitHub Release + 市场条目 PR
 ```
+
+**npm 那一步现在由 CI 发**：推 `v*` tag 会触发 [`.github/workflows/publish.yml`](.github/workflows/publish.yml)，
+它用 npm 的 **Trusted Publishing（OIDC）**发同一个包——仓库里没有任何 `NODE_AUTH_TOKEN`、
+不需要 2FA、也不需要本机 `npm login`。GitHub 为这次运行签发一个短期 OIDC token，npm 拿它和
+「这个包的 Trusted Publisher 配置」比对（`repository` / workflow 文件名 / 权限），通过后才给这一条
+`publish` 命令发临时凭据，并附上 provenance 签名。
+
+本地与 CI 共用同一段暂存逻辑：`node scripts/release.mjs --stage-only --npm-name dsh-doudizhu-lan`
+只把「解包、改名、去掉生命周期脚本」做完并打印目录，CI 在这个目录里 `npm publish --provenance`。
+
+一次性配置已完成（`npm trust list dsh-doudizhu-lan` 可复核），关系 id
+`b209784b-cd85-4971-9983-401a5e30c378`：仓库 `dingchenhui0618-arch/dsh-doudizhu`、
+workflow `publish.yml`、权限 `createPackage` + `createStagedPackage`、环境留空。
+它**不能用 npm 11 注册**（11.12.1 打过去是 400，payload 缺权限字段），要用 npm 12 的
+`npm trust github … --allow-publish`；这条注册本身要一次 2FA（passkey），之后发版都不再需要。
 
 八步、幂等、每步都有验收信号：
 
@@ -609,18 +624,18 @@ node scripts/release.mjs --market      # 真发：npm + tag/push + GitHub Releas
 | preflight | 版本 / 分支 / 工作区 / CHANGELOG / 单测 / pre-push 三步 | 任何一项不过就停 |
 | build | 重建 `lib/` | esbuild 的输出 |
 | pack | `npm pack` + sha256 | 包内 `package.json` 的版本 == 目标版本 |
-| npm | `npm publish --access public`（`--npm-name` 时发解包改名的那份） | `npm view <name>@<ver>` 查得到 |
+| npm | 本地 `--stage-only` 准备目录；tag 推上去后由 `publish.yml` 用 OIDC 发 | `npm view <name>@<ver>` 查得到，且带 provenance 勾 |
 | git | 打 tag、推 main 与 tag | `git ls-remote` 查得到 tag |
 | release | `gh release create`，notes 由 CHANGELOG 那一节生成 | asset 的 digest == 本地 sha256 |
 | market | 市场条目换 tarball 与用例数；有同分支 PR 就地更新，否则从 main 起新分支开 PR | 条目指着这一版 |
 | verify | 三处 sha256 比对（本地 / asset / 下载回来的包） | 三处一致 |
 
 **被外部条件卡住时它标 `⛔ BLOCKED` 并返回退出码 2**（`0` 全绿、`1` 有步骤失败），
-不会把没做成的事写成做成了。目前唯一会让它返回 2 的是 npm 登录态：
+不会把没做成的事写成做成了。npm 那步交给 CI 之后，本机已经不会再卡在 2FA 上；真要它自己发
+（比如 CI 挂了、急着补一版），仍然可以本地跑：
 
 ```sh
-npm login                                  # 或把带 publish 权限的 granular token 写进 ~/.npmrc
-node scripts/release.mjs                   # 再跑一次：npm 那步补上，已完成的两步自动跳过
+node scripts/release.mjs --npm-name dsh-doudizhu-lan   # 交互终端里跑，按一次 passkey
 ```
 
 > **npm 上的 `dsh-doudizhu` 归 `awesomehou`**（2026-08-18 用 `0.0.0` 占位包占的，
@@ -645,7 +660,8 @@ node scripts/release.mjs                   # 再跑一次：npm 那步补上，�
 > npm 只是第二条安装通道：市场的 `probe-npm.mjs` 靠**包里的 `repository` 字段**指回同一个
 > 仓库才会认领它，所以 `package.json` 里那几个字段不是装饰。
 
-**已经发出去的一版**：`dsh-doudizhu-lan@0.2.4`（`latest`，`SECURITY.md` 已随包发布）。从 npm 装出来验过：目录名
+**已经发出去的一版**：`dsh-doudizhu-lan@0.2.5`（`latest`，`SECURITY.md` 已随包发布，由 CI 用
+Trusted Publishing 发出，见下面「发布」）。从 npm 装出来验过：目录名
 `node_modules/dsh-doudizhu-lan`、`cordis.patch.yml` 里引用名是 `dsh-doudizhu-lan`、
 `lib/index.js` 导出 `name = "dsh-doudizhu"` / `inject = ["webServer"]` / `apply` 是函数
 （包名和插件 id 是两回事，插件 id 一直叫 `dsh-doudizhu`）。
@@ -653,15 +669,10 @@ node scripts/release.mjs                   # 再跑一次：npm 那步补上，�
 
 包里还留着一个 `0.0.0-stage`——那是 npm 自己为 staged publishing 建的占位版本，不是我们发的。
 
-> **这条通道有一处自动化不了**：npm 的 `publish` 要 2FA。脚本（非交互）发到这里会拿到
-> `EOTP`，然后打印两行让你在真终端里贴——浏览器弹出来、按一下安全密钥（passkey 存在
-> Google 密码管理器里，点 Continue 即可），publish 才继续。脚本不会假装成功，它标
-> `⛔ BLOCKED` 并给出那两行命令；发成功后其余步骤照样全绿：
->
-> ```sh
-> node scripts/release.mjs --npm-name dsh-doudizhu-lan   # npm 那步 BLOCKED
-> cd _tmp/npm-stage/package && npm publish --access public   # 在真终端里跑，按 passkey
-> ```
+> **2FA 已经不在这条路上了。** 0.2.5 起 npm 发布走 Trusted Publishing：tag 一推，CI 用 OIDC
+> 换一次性凭据，浏览器不用弹、passkey 不用按。passkey 只在**注册这个信任关系**时需要一次
+> （`npm trust github` 打注册接口要 2FA），配好之后日常发版等于零交互。若哪天信任关系被删，
+> `npm publish` 会退回 `EOTP` 并打印恢复命令，脚本照旧标 `⛔ BLOCKED`，不会假装成功。
 
 ## 许可
 
