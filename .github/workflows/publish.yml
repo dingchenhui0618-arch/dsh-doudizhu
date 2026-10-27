@@ -1,0 +1,93 @@
+name: Publish
+
+# 用 npm Trusted Publishing（OIDC）发版：仓库里没有任何 NODE_AUTH_TOKEN，也不需要 2FA。
+# GitHub 为这次运行签发一个短期 OIDC token，npm 拿它和「这个包的 Trusted Publisher 配置」
+# 比对，通过后只给这一条 publish 命令发临时凭据。
+#
+# 一次性设置（在 npm 上做，包必须已经存在）：
+#   https://www.npmjs.com/package/dsh-doudizhu-lan/access -> Trusted Publisher
+#     Organization or user: dingchenhui0618-arch
+#     Repository:           dsh-doudizhu
+#     Workflow filename:    publish.yml
+#     Environment:          (留空)
+#
+# 为什么 CI 只做「暂存 + 发布」两步：仓库里的包名是 `dsh-doudizhu`（市场与本地 link: 安装
+# 都靠它），npm 上发布用的是 `dsh-doudizhu-lan`。两处名字必须一起改写，这套逻辑本来就写在
+# `scripts/release.mjs` 里，所以这里调它的 `--stage-only` 模式，不再复制一份。
+#
+# 触发方式：推 `v*` tag（正常工作流），也可以手工 workflow_dispatch 验证链路。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install build dependency
+        run: npm install --no-audit --no-fund
+
+      - name: Unit tests
+        run: npm test
+
+      # lib/ 是提交进仓库的构建产物；tag 上的 lib/ 必须就是 src/ 编出来的那一份。
+      - name: lib/ matches src/
+        shell: bash
+        run: |
+          node scripts/build.mjs
+          if [ -n "$(git status --porcelain -- lib)" ]; then
+            git status --porcelain -- lib
+            echo "::error::lib/ is out of date - run npm run build before tagging"
+            exit 1
+          fi
+
+      # 防止「tag 是 v1.2.0，package.json 还写着 1.1.0」：npm 会拒，但这里更早、说得更清楚。
+      - name: Verify the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          tag=${GITHUB_REF_NAME#v}
+          if [ "$pkg" != "$tag" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $pkg" >&2
+            exit 1
+          fi
+          echo "Publishing $pkg"
+
+      # Trusted Publishing 要求 npm CLI >= 11.5.1；Node 22 自带的是 10.x。
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+
+      - name: Stage the npm package (rename to dsh-doudizhu-lan)
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=$(node scripts/release.mjs --stage-only --npm-name dsh-doudizhu-lan \
+            --skip preflight,git,release,market,verify)
+          echo "$out"
+          dir=$(printf '%s\n' "$out" | sed -n 's/^NPM_PUBLISH_DIR=//p' | tail -1)
+          test -n "$dir" || { echo "::error::release.mjs did not report a staging dir"; exit 1; }
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          node -e "
+            const p = require('$dir/package.json')
+            if (p.name !== 'dsh-doudizhu-lan') throw new Error('staged name is ' + p.name)
+            console.log('staged', p.name + '@' + p.version)
+          "
+
+      - name: Publish with provenance
+        working-directory: ${{ steps.stage.outputs.dir }}
+        run: npm publish --provenance --access public

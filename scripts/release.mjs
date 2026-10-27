@@ -45,6 +45,7 @@ function parseArgs(argv) {
     }
     if (arg === '--dry-run') out.dry = true
     else if (arg === '--market') out.market = true
+    else if (arg === '--stage-only') out.stageOnly = true
     else if (arg === '--version') out.version = next()
     else if (arg === '--skip') for (const id of next().split(',')) out.skip.add(id.trim())
     else if (arg === '--npm-name') out.npmName = next()
@@ -112,6 +113,37 @@ function changelogSection(version) {
   const rest = text.slice(hit.index + hit[0].length)
   const next = /^## \[/m.exec(rest)
   return (next ? rest.slice(0, next.index) : rest).trim()
+}
+
+/**
+ * 把 tarball 解到 `_tmp/npm-stage/package`，并改造成能直接 `npm publish` 的目录：
+ * 换成要发布的包名、去掉生命周期脚本、`cordis.patch.yml` 里的引用名同步改。
+ * CI 里的 Trusted Publishing 走的就是这条路径（`--stage-only` 只暂存、不发布）。
+ */
+function stagePackage(tarball, name) {
+  if (!tarball || !existsSync(tarball)) return { ok: false, why: '没有 tarball' }
+  const stage = join(TMP, 'npm-stage')
+  rmSync(stage, { recursive: true, force: true })
+  mkdirSync(stage, { recursive: true })
+  const untar = sh('tar', ['-xzf', tarball, '-C', stage])
+  if (!untar.ok) return { ok: false, why: '解不开 tarball' }
+  const dir = join(stage, 'package')
+  const pjPath = join(dir, 'package.json')
+  const staged = JSON.parse(readFileSync(pjPath, 'utf8'))
+  staged.name = name
+  // 打包产物里没有 scripts/，`prepack` 会在暂存目录里跑一次 build 然后失败。
+  // tarball 里已经带着构建好的 lib/，发布时不需要再跑生命周期脚本。
+  if (staged.scripts) {
+    delete staged.scripts.prepack
+    delete staged.scripts.prepare
+  }
+  writeFileSync(pjPath, JSON.stringify(staged, null, 2) + '\n')
+  const patchPath = join(dir, 'cordis.patch.yml')
+  if (existsSync(patchPath)) {
+    writeFileSync(patchPath, readFileSync(patchPath, 'utf8')
+      .replace(/^(\s*name:\s*)dsh-doudizhu\s*$/gm, `$1${name}`))
+  }
+  return { ok: true, dir }
 }
 
 /** 从 `git remote get-url origin` 里取 owner/repo。 */
@@ -245,7 +277,22 @@ async function main() {
   let npmPublished = false
   if (want('npm')) {
     stepStarted('npm 发布')
-    if (dry) {
+    if (args.stageOnly) {
+      // 只暂存、不发布：CI 里由 `npm publish --provenance` 用 OIDC 发（Trusted Publishing），
+      // 所以这里只需要把「要发的那个目录」准备好并打印出来。
+      const name = args.npmName ?? pkg.name
+      npmName = name
+      const staged = stagePackage(tarball, name)
+      if (!staged.ok) {
+        warn(`暂存失败：${staged.why}`)
+        FAILED.push('npm')
+        results.push({ step: 'npm', status: 'failed' })
+      } else {
+        note(`暂存目录 ${rel(staged.dir)}（包名与 patch 引用改成 ${name}）`)
+        console.log(`NPM_PUBLISH_DIR=${staged.dir}`)
+        results.push({ step: 'npm', status: 'staged', dir: rel(staged.dir), name })
+      }
+    } else if (dry) {
       // dry-run 不碰登录态（whoami 会真的打网络），只把判定逻辑讲清楚。
       note(`将检查 npm 登录态；包名 ${args.npmName ?? pkg.name} 被别人占着就提示改用 scope 名`)
       note(`已在 npm 上的版本会跳过发布；否则 $ npm publish --access public`)
@@ -287,31 +334,13 @@ async function main() {
           // 否则 scoped 安装后 bundle patch 指不回自己的 lib/。
           let publishDir = ROOT
           if (name !== pkg.name) {
-            const stage = join(TMP, 'npm-stage')
-            rmSync(stage, { recursive: true, force: true })
-            mkdirSync(stage, { recursive: true })
-            const untar = sh('tar', ['-xzf', tarball, '-C', stage])
-            if (!untar.ok) {
-              warn('解不开刚打出来的 tarball，没发。')
+            const staged = stagePackage(tarball, name)
+            if (!staged.ok) {
+              warn(`解不开刚打出来的 tarball（${staged.why}），没发。`)
               FAILED.push('npm')
               results.push({ step: 'npm', status: 'failed' })
             } else {
-              publishDir = join(stage, 'package')
-              const pjPath = join(publishDir, 'package.json')
-              const staged = JSON.parse(readFileSync(pjPath, 'utf8'))
-              staged.name = name
-              // 打包产物里没有 scripts/，`prepack` 会在暂存目录里跑一次 build 然后失败。
-              // tarball 里已经带着构建好的 lib/，发布时不需要再跑生命周期脚本。
-              if (staged.scripts) {
-                delete staged.scripts.prepack
-                delete staged.scripts.prepare
-              }
-              writeFileSync(pjPath, JSON.stringify(staged, null, 2) + '\n')
-              const patchPath = join(publishDir, 'cordis.patch.yml')
-              if (existsSync(patchPath)) {
-                writeFileSync(patchPath, readFileSync(patchPath, 'utf8')
-                  .replace(/^(\s*name:\s*)dsh-doudizhu\s*$/gm, `$1${name}`))
-              }
+              publishDir = staged.dir
               note(`暂存目录 ${rel(publishDir)}（包名与 patch 引用改成 ${name}）`)
             }
           }
@@ -590,7 +619,10 @@ function report(results, version, args) {
   console.log('└────────────┴────────┘')
   for (const b of BLOCKED) console.log(`⛔ ${b}`)
   for (const f of FAILED) console.log(`❌ ${f}`)
-  if (!FAILED.length && !BLOCKED.length) console.log(`\n🟢 ${version} 发布完毕${args.dry ? '（dry-run，什么都没改）' : ''}`)
+  if (!FAILED.length && !BLOCKED.length) {
+    if (args.stageOnly) console.log(`\n🟢 ${version} 已暂存（发布交给 CI 的 Trusted Publishing）`)
+    else console.log(`\n🟢 ${version} 发布完毕${args.dry ? '（dry-run，什么都没改）' : ''}`)
+  }
 }
 
 main()
