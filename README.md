@@ -1,5 +1,15 @@
 # dsh-doudizhu
 
+> **这份代码是谁、装哪个包、现在什么版本 —— 先看这三行，名字撞车很常见。**
+>
+> - 仓库：`dingchenhui0618-arch/dsh-doudizhu`（**三人局域网**斗地主，浮窗在 DeepSeek Harness 里打）
+> - npm 包名：**`@dingchenhui/dsh-doudizhu`**（最新 `0.2.2`）。npm 上**不带 scope** 的
+>   `dsh-doudizhu` 是别人 2026-08-18 发的 `0.0.0` 占位包，**不是这个项目**；GitHub 上还有
+>   `lifefloating/dsh-doudizhu`、`AwesomeHou/dsh-doudizhu`、`sunruize93-cmyk/dsh-doudizhu`
+>   等几个同名仓库，也都不是这个项目。
+> - 最新修复：**`0.2.2`（2026-10-21）修了「一个人 + 两台电脑时电脑不出牌」**——原因见
+>   [CHANGELOG 的 0.2.2 一节](CHANGELOG.md#022---2026-10-21)。安装与升级见下面「安装」。
+
 DeepSeek Harness 的插件：**三人局域网斗地主**。三个人各自在自己那台 DSH 里用浮窗打牌，
 其中一台当权威服务，另外两台连过来。**人不够也能玩**：空位可以交给电脑补，四档强度
 （简单 / 中等 / 困难 / 地狱）随时可换，一个人或两个人照样能打完整一局。
@@ -72,7 +82,7 @@ v0.2.0 把界面从「能打」推到「一眼看懂」：
 | M5 浮窗 UI `src/client.cjs` | ✅ 完成 | 45 个用例：26 个展示逻辑 + 4 个浏览器半区依赖守卫 + 19 个**跑真实 `lib/client.js`** 的渲染/交互用例（含 2 个拖动手势）；真实 Chrome 走过开房→入座→叫分定地主；真 GUI 里两个槽位 `active`、标签页与浮窗药丸已抓图；**v0.1.5 修掉浮窗「拖一下自己就展开」**，在真 Chrome 里用 CDP 拖过一遍（见「真实浏览器里验过什么」）。**v0.2.0 重做牌桌**：三张并排座位卡 + 台面一行说清要压什么 + 出牌历史就地展开 + 提示/帮我出 + 随时改名，三张真实渲染图见「界面」 |
 | M6 电脑玩家 `src/bot.js` | ✅ 完成 | 19 个用例：**电脑视图字段集被钉死**（多一个字段就红）、四档在全电脑/1人+2电脑/2人+1电脑三种桌上都能打完整局且**一次都没提出非法出法**、强度排序用同牌同座位的配对联赛量出来、`地狱` 的记账能力有构造用例，叫分档位单调有一条专门用例。**v0.1.5 把四档从 31.1 / 43.9 / 56.7 / 57.8 拉到 31.1 / 43.9 / 63.3 / 66.7**（60 seeds，见「电脑玩家有多强」）。另有 `scripts/live-bots.mjs` 在**重启后运行中的 DSH 里**用「1 真人 + 2 台地狱电脑」打完一整盘：脚本只发 0 号位的 15 次请求，电脑自己出牌 22 次、叫分 2 次，零保底，54 张齐 |
 | M7 三机实机验收 | ⬜ 未开始 | 步骤见下面「三机实机怎么跑」；本机的传输路径已通，缺的是另外两台真机器 |
-| M8 开源推送 | ✅ 完成 | <https://github.com/dingchenhui0618-arch/dsh-doudizhu>（public，v0.2.0 已发布）；市场 PR [#8022](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8022) 的 Submission gate 与 check **全绿**，等维护者合并 |
+| M8 开源推送 | ✅ 完成 | <https://github.com/dingchenhui0618-arch/dsh-doudizhu>（public，v0.2.2 已发布）；市场 PR [#8397](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8397) **已合并**（2026-10-21），市场条目指向 `v0.2.2/dsh-doudizhu-0.2.2.tgz` |
 
 当前 `node --test "test/*.test.mjs"`：**179 个用例全部通过**（约 4 秒）。
 规则 18、出法枚举 8、牌局 20、房间 23、传输 12、插件 host 13、半区契约 3、展示逻辑 27、
