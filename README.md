@@ -599,14 +599,16 @@ node scripts/live-bots.mjs --level hell          # 1 真人 + 2 台地狱电脑
 
 ```sh
 node scripts/release.mjs --dry-run                    # 先看它打算做什么，一个字节都不改
-node scripts/release.mjs --skip npm --market          # 真发：tag/push + GitHub Release + 市场条目 PR
+node scripts/release.mjs --market                     # 真发：tag/push + GitHub Release + 市场条目 PR
 ```
 
-**npm 那一步现在由 CI 发**：推 `v*` tag 会触发 [`.github/workflows/publish.yml`](.github/workflows/publish.yml)，
-它用 npm 的 **Trusted Publishing（OIDC）**发同一个包——仓库里没有任何 `NODE_AUTH_TOKEN`、
-不需要 2FA、也不需要本机 `npm login`。GitHub 为这次运行签发一个短期 OIDC token，npm 拿它和
-「这个包的 Trusted Publisher 配置」比对（`repository` / workflow 文件名 / 权限），通过后才给这一条
-`publish` 命令发临时凭据，并附上 provenance 签名。
+**npm 那一步现在自动交给 CI**：仓库里有 `.github/workflows/publish.yml` 时，脚本把 npm 标成
+`🤖 delegated` 而不是自己去发（本地发要 2FA，非交互必卡）；推 `v*` tag 之后由
+[`publish.yml`](.github/workflows/publish.yml) 用 npm 的 **Trusted Publishing（OIDC）**发同一个包——
+仓库里没有任何 `NODE_AUTH_TOKEN`、不需要 2FA、也不需要本机 `npm login`。GitHub 为这次运行签发
+一个短期 OIDC token，npm 拿它和「这个包的 Trusted Publisher 配置」比对（`repository` / workflow
+文件名 / 权限），通过后才给这一条 `publish` 命令发临时凭据，并附上 provenance 签名。
+真要本机直发（CI 挂了、急着补一版）：`--local-publish`，会在交互终端里要一次 passkey。
 
 本地与 CI 共用同一段暂存逻辑：`node scripts/release.mjs --stage-only --npm-name dsh-doudizhu-lan`
 只把「解包、改名、去掉生命周期脚本」做完并打印目录，CI 在这个目录里 `npm publish --provenance`。
