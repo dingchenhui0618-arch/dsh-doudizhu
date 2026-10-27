@@ -7,7 +7,7 @@
 > **这份代码是谁、装哪个包、现在什么版本 —— 先看这三行，名字撞车很常见。**
 >
 > - 仓库：`dingchenhui0618-arch/dsh-doudizhu`（**三人局域网**斗地主，浮窗在 DeepSeek Harness 里打）
-> - npm 包名：**`dsh-doudizhu-lan`**（最新 `0.2.3`，`npm i dsh-doudizhu-lan`）。npm 上
+> - npm 包名：**`dsh-doudizhu-lan`**（最新 `0.2.4`，`npm i dsh-doudizhu-lan`）。npm 上
 >   **不带 scope** 的 `dsh-doudizhu` 是别人 2026-08-18 发的 `0.0.0` 占位包，**不是这个项目**；
 >   旧的 `@dingchenhui/dsh-doudizhu` 是本项目 0.2.1–0.2.2 用过的名字，已标 deprecated。
 >   GitHub 上还有 `lifefloating/dsh-doudizhu`、`AwesomeHou/dsh-doudizhu`、
@@ -20,7 +20,7 @@ DeepSeek Harness 的插件：**三人局域网斗地主**。三个人各自在�
 （简单 / 中等 / 困难 / 地狱）随时可换，一个人或两个人照样能打完整一局。
 
 > **当前进度：规则引擎、牌局状态机、权威房间服务与传输、DSH 插件两个半区（host + 浮窗/标签页
-> 客户端）、电脑玩家都已完成并有测试覆盖（179 个用例）；已开源推送（仓库 public、v0.2.3 已发布、
+> 客户端）、电脑玩家都已完成并有测试覆盖（179 个用例）；已开源推送（仓库 public、v0.2.4 已发布、
 > 终端 npm 与市场 PR 两条通道都打过）。只剩三机实机验收没跑——那需要另外两台真机器。**
 > 具体的完成边界见「进度」一节，不要按 README 的愿景当成已实现的能力。
 
@@ -405,7 +405,7 @@ DSH 自己的 Web 认证**不覆盖插件用 `ctx.webServer.register` 挂的 pre
 （所以这个仓库的 `.gitignore` 故意**不**忽略 `lib/`）。把这一行地址交给 DSH 的插件管理器：
 
 ```
-https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.2.3/dsh-doudizhu-0.2.3.tgz
+https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.2.4/dsh-doudizhu-0.2.4.tgz
 ```
 
 （npm 上另有一条通道，包名是 **`dsh-doudizhu-lan`**：`npm i dsh-doudizhu-lan`。为什么不用
@@ -645,7 +645,7 @@ node scripts/release.mjs                   # 再跑一次：npm 那步补上，�
 > npm 只是第二条安装通道：市场的 `probe-npm.mjs` 靠**包里的 `repository` 字段**指回同一个
 > 仓库才会认领它，所以 `package.json` 里那几个字段不是装饰。
 
-**已经发出去的一版**：`dsh-doudizhu-lan@0.2.3`（`latest`）。从 npm 装出来验过：目录名
+**已经发出去的一版**：`dsh-doudizhu-lan@0.2.4`（`latest`，`SECURITY.md` 已随包发布）。从 npm 装出来验过：目录名
 `node_modules/dsh-doudizhu-lan`、`cordis.patch.yml` 里引用名是 `dsh-doudizhu-lan`、
 `lib/index.js` 导出 `name = "dsh-doudizhu"` / `inject = ["webServer"]` / `apply` 是函数
 （包名和插件 id 是两回事，插件 id 一直叫 `dsh-doudizhu`）。
