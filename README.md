@@ -3,10 +3,11 @@
 > **这份代码是谁、装哪个包、现在什么版本 —— 先看这三行，名字撞车很常见。**
 >
 > - 仓库：`dingchenhui0618-arch/dsh-doudizhu`（**三人局域网**斗地主，浮窗在 DeepSeek Harness 里打）
-> - npm 包名：**`@dingchenhui/dsh-doudizhu`**（最新 `0.2.2`）。npm 上**不带 scope** 的
->   `dsh-doudizhu` 是别人 2026-08-18 发的 `0.0.0` 占位包，**不是这个项目**；GitHub 上还有
->   `lifefloating/dsh-doudizhu`、`AwesomeHou/dsh-doudizhu`、`sunruize93-cmyk/dsh-doudizhu`
->   等几个同名仓库，也都不是这个项目。
+> - npm 包名：**`dsh-doudizhu-lan`**（最新 `0.2.3`，`npm i dsh-doudizhu-lan`）。npm 上
+>   **不带 scope** 的 `dsh-doudizhu` 是别人 2026-08-18 发的 `0.0.0` 占位包，**不是这个项目**；
+>   旧的 `@dingchenhui/dsh-doudizhu` 是本项目 0.2.1–0.2.2 用过的名字，已标 deprecated。
+>   GitHub 上还有 `lifefloating/dsh-doudizhu`、`AwesomeHou/dsh-doudizhu`、
+>   `sunruize93-cmyk/dsh-doudizhu` 等几个同名仓库，也都不是这个项目。
 > - 最新修复：**`0.2.2`（2026-10-21）修了「一个人 + 两台电脑时电脑不出牌」**——原因见
 >   [CHANGELOG 的 0.2.2 一节](CHANGELOG.md#022---2026-10-21)。安装与升级见下面「安装」。
 
@@ -393,11 +394,12 @@ DSH 自己的 Web 认证**不覆盖插件用 `ctx.webServer.register` 挂的 pre
 （所以这个仓库的 `.gitignore` 故意**不**忽略 `lib/`）。把这一行地址交给 DSH 的插件管理器：
 
 ```
-https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.2.0/dsh-doudizhu-0.2.0.tgz
+https://github.com/dingchenhui0618-arch/dsh-doudizhu/releases/download/v0.2.3/dsh-doudizhu-0.2.3.tgz
 ```
 
-（npm 上另有一条通道，**包名带 scope**：`@dingchenhui/dsh-doudizhu`。不带 scope 的
-`dsh-doudizhu` 在 npm 上被别的人用 `0.0.0` 占着，不能发，详见「发布」一节。）
+（npm 上另有一条通道，包名是 **`dsh-doudizhu-lan`**：`npm i dsh-doudizhu-lan`。为什么不用
+`dsh-doudizhu`——那个名字被别人的占位包占着；为什么从 scoped 名换成它——scoped 名在 npm 搜索里
+搜不到，详见「发布」一节。旧的 `@dingchenhui/dsh-doudizhu` 已标 deprecated，仍可装，但不再更新。）
 
 三条路都通向同一个动作，挑顺手的：
 
@@ -611,24 +613,33 @@ node scripts/release.mjs                   # 再跑一次：npm 那步补上，�
 ```
 
 > **npm 上的 `dsh-doudizhu` 归 `awesomehou`**（2026-08-18 用 `0.0.0` 占位包占的，
-> 描述写着"Will be replaced by the real package"）。0.2.1 起 **npm 通道改用 scope 名**：
+> 描述写着"Will be replaced by the real package"；他自己也有一个同名 DSH 斗地主插件，
+> 所以这个名字不会让出来）。0.2.3 起 **npm 通道改用无 scope 的名字 `dsh-doudizhu-lan`**：
 >
 > ```sh
-> node scripts/release.mjs --npm-name @dingchenhui/dsh-doudizhu
+> node scripts/release.mjs --npm-name dsh-doudizhu-lan
 > ```
 >
+> 0.2.1 到 0.2.2 用的是 `@dingchenhui/dsh-doudizhu`，现在标成 deprecated 指向新名——
+> **不是它坏了，是它搜不到**：npm 搜索把 `@scope/name` 当一个词，搜 `dsh-doudizhu`
+> 匹配不上带 scope 的名字，2026-10-27 实测搜 `dsh-doudizhu` / `doudizhu` / `斗地主`
+> 三条都出不来它。改名的验收标准也就一条：用 `registry.npmjs.org/-/v1/search` 搜
+> `dsh-doudizhu` 能看见 `dsh-doudizhu-lan`。
+>
 > 发的是打包之后**解包再改名**的那份：内容与 GitHub asset 逐字节相同，只改 `package.json`
-> 的 `name` 和 `cordis.patch.yml` 里的引用名（两处必须一起改，否则 scoped 装完 patch 指不回
-> 自己的 `lib/`，插件会静默不挂载）。GitHub Release 那条通道保持不带 scope 的原名不动，
-> 两条通道互不影响。
+> 的 `name` 和 `cordis.patch.yml` 里的引用名（两处必须一起改，否则装完 patch 指不回自己的
+> `lib/`，插件会静默不挂载）。GitHub Release 那条通道保持不带 scope 的原名不动，两条通道
+> 互不影响。
 > 市场条目的 `tarball` 必须留在 GitHub Release（市场只收 GitHub 托管的 tarball），
 > npm 只是第二条安装通道：市场的 `probe-npm.mjs` 靠**包里的 `repository` 字段**指回同一个
 > 仓库才会认领它，所以 `package.json` 里那几个字段不是装饰。
 
-**已经发出去的一版**：`@dingchenhui/dsh-doudizhu@0.2.1`（`latest`，shasum
-`cd39856fc27b9aaeca817d8b667cd29e96095736`）。从 npm 装出来验过：目录名
-`node_modules/@dingchenhui/dsh-doudizhu`、`cordis.patch.yml` 里引用名是同名 scope、
-`lib/index.js` 导出 `name = "dsh-doudizhu"` / `inject = ["webServer"]` / `apply` 是函数。
+**已经发出去的一版**：`dsh-doudizhu-lan@0.2.3`（`latest`）。从 npm 装出来验过：目录名
+`node_modules/dsh-doudizhu-lan`、`cordis.patch.yml` 里引用名是 `dsh-doudizhu-lan`、
+`lib/index.js` 导出 `name = "dsh-doudizhu"` / `inject = ["webServer"]` / `apply` 是函数
+（包名和插件 id 是两回事，插件 id 一直叫 `dsh-doudizhu`）。
+上一个名字 `@dingchenhui/dsh-doudizhu@0.2.2` 已经发过、验过，现在只是被 deprecated。
+
 包里还留着一个 `0.0.0-stage`——那是 npm 自己为 staged publishing 建的占位版本，不是我们发的。
 
 > **这条通道有一处自动化不了**：npm 的 `publish` 要 2FA。脚本（非交互）发到这里会拿到
@@ -637,8 +648,8 @@ node scripts/release.mjs                   # 再跑一次：npm 那步补上，�
 > `⛔ BLOCKED` 并给出那两行命令；发成功后其余步骤照样全绿：
 >
 > ```sh
-> node scripts/release.mjs --npm-name @dingchenhui/dsh-doudizhu   # npm 那步 BLOCKED
-> cd _tmp/npm-stage/package && npm publish --access public        # 在真终端里跑，按 passkey
+> node scripts/release.mjs --npm-name dsh-doudizhu-lan   # npm 那步 BLOCKED
+> cd _tmp/npm-stage/package && npm publish --access public   # 在真终端里跑，按 passkey
 > ```
 
 ## 许可

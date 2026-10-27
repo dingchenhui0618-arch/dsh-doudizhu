@@ -5,6 +5,46 @@
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-27
+
+### 换 npm 名：`dsh-doudizhu-lan`（功能与 0.2.2 完全一致）
+
+这一版没有改一行运行逻辑，改的是**能不能被搜到**。2026-10-27 实测 npm 搜索：
+
+| 搜什么 | 结果里有我们吗 |
+| --- | --- |
+| `dsh-doudizhu` | 没有。第 1 条是别人 2026-08-18 的 `dsh-doudizhu@0.0.0` 占位包（"Will be replaced by the real package"） |
+| `doudizhu` | 没有（占位包第 5） |
+| `斗地主` | 没有（`dsh-poker`、`@dsh-blue/blue-doudizhu` 都在） |
+| `@dingchenhui/dsh-doudizhu`（连自己的全名） | 没有——返回的是一堆 `@deepseek-ai/*` 泛化结果 |
+
+原因不是描述写得不够长，是名字的形状：npm 搜索把 `@scope/name` 当一个 token，搜
+`dsh-doudizhu` 匹配不上 `@dingchenhui/dsh-doudizhu`；这个包又只有几天、下载量 0，
+没有热度信号可以顶上来。而 `dsh-doudizhu` 这个名字是 `awesomehou` 占的（他自己也有
+同名 DSH 斗地主插件），要不回来，所以取了个无 scope、且以 `dsh-doudizhu` 开头的新名：
+
+```sh
+npm i dsh-doudizhu-lan
+```
+
+- npm 主名：`dsh-doudizhu-lan`（`latest` = 0.2.3）
+- 旧名 `@dingchenhui/dsh-doudizhu`（0.2.1–0.2.2）标 **deprecated**，指向新名；已装的不用
+  动，它里面就是 0.2.2 的修复，只是不再更新
+- 包内元数据一起改：`description` 开头放「斗地主 / Doudizhu」，`keywords` 从 7 个扩到
+  21 个（`斗地主`、`ddz`、`dsh-doudizhu`、`cordis-plugin`、`floating-window` 等）
+- GitHub 仓库描述与 topics 也补了（`doudizhu`、`card-game`、`lan`、`multiplayer`…），
+  README 开头三行block 写清「哪个包是这个项目、哪些同名仓库不是」
+- **验收标准**：`registry.npmjs.org/-/v1/search?text=dsh-doudizhu` 的结果里能看见
+  `dsh-doudizhu-lan`。发完实测写在下面。
+
+### 这一版发到哪了
+
+| 通道 | 坐标 | 校验 |
+| --- | --- | --- |
+| GitHub Release | `v0.2.3` | sha256 三处一致（见发布脚本输出） |
+| npm | `dsh-doudizhu-lan@0.2.3` | 装回来验过包名、patch 引用名与三个导出 |
+| 市场 | 条目 tarball 指到 v0.2.3 | PR 就地更新 |
+
 ## [0.2.2] - 2026-10-21
 
 ### 修：电脑卡住不出牌
