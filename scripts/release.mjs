@@ -46,6 +46,7 @@ function parseArgs(argv) {
     if (arg === '--dry-run') out.dry = true
     else if (arg === '--market') out.market = true
     else if (arg === '--stage-only') out.stageOnly = true
+    else if (arg === '--local-publish') out.localPublish = true
     else if (arg === '--version') out.version = next()
     else if (arg === '--skip') for (const id of next().split(',')) out.skip.add(id.trim())
     else if (arg === '--npm-name') out.npmName = next()
@@ -159,7 +160,7 @@ function githubSlug() {
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   if (args.help) {
-    console.log('node scripts/release.mjs [--dry-run] [--market] [--version x.y.z] [--skip a,b]')
+    console.log('node scripts/release.mjs [--dry-run] [--market] [--version x.y.z] [--skip a,b] [--local-publish] [--stage-only]')
     return 0
   }
   mkdirSync(TMP, { recursive: true })
@@ -277,7 +278,17 @@ async function main() {
   let npmPublished = false
   if (want('npm')) {
     stepStarted('npm 发布')
-    if (args.stageOnly) {
+    // 0.2.5 起 npm 由 CI 发：`.github/workflows/publish.yml` 在 tag 推上去后用 Trusted
+    // Publishing（OIDC）发布。本地这条老路径要 2FA，非交互跑必然 BLOCKED，所以默认把这一步
+    // 交给 CI；要本机直接发（CI 挂了、急着补一版）就传 --local-publish。
+    const delegated = !args.stageOnly && !args.localPublish
+      && existsSync(join(ROOT, '.github', 'workflows', 'publish.yml'))
+    if (delegated) {
+      npmName = args.npmName ?? `${pkg.name}-lan`
+      note('交给 CI 发：tag 推上去后 publish.yml 用 Trusted Publishing（OIDC）发布，不需要 2FA')
+      note(`本机要直接发就传 --local-publish（会在交互终端里要一次 passkey）`)
+      results.push({ step: 'npm', status: 'delegated', name: npmName })
+    } else if (args.stageOnly) {
       // 只暂存、不发布：CI 里由 `npm publish --provenance` 用 OIDC 发（Trusted Publishing），
       // 所以这里只需要把「要发的那个目录」准备好并打印出来。
       const name = args.npmName ?? pkg.name
@@ -613,7 +624,7 @@ function report(results, version, args) {
   } catch {
     /* 收据写不下不影响发布结论 */
   }
-  const icon = { done: '✅', failed: '❌', blocked: '⛔', planned: '📝' }
+  const icon = { done: '✅', failed: '❌', blocked: '⛔', planned: '📝', delegated: '🤖', staged: '🗂' }
   console.log('\n┌────────────┬────────┐')
   for (const r of results) console.log(`│ ${r.step.padEnd(10)} │ ${icon[r.status] ?? '·'} ${r.status.padEnd(4)} │`)
   console.log('└────────────┴────────┘')
