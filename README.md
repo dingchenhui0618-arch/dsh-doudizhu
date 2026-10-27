@@ -1,5 +1,10 @@
 # dsh-doudizhu
 
+[![CI](https://github.com/dingchenhui0618-arch/dsh-doudizhu/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dingchenhui0618-arch/dsh-doudizhu/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/dsh-doudizhu-lan.svg)](https://www.npmjs.com/package/dsh-doudizhu-lan)
+[![downloads](https://img.shields.io/npm/dt/dsh-doudizhu-lan.svg)](https://www.npmjs.com/package/dsh-doudizhu-lan)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 > **这份代码是谁、装哪个包、现在什么版本 —— 先看这三行，名字撞车很常见。**
 >
 > - 仓库：`dingchenhui0618-arch/dsh-doudizhu`（**三人局域网**斗地主，浮窗在 DeepSeek Harness 里打）
@@ -19,6 +24,13 @@ DeepSeek Harness 的插件：**三人局域网斗地主**。三个人各自在�
 > 客户端）、电脑玩家都已完成并有测试覆盖（179 个用例）；已开源推送（仓库 public、v0.2.3 已发布、
 > 终端 npm 与市场 PR 两条通道都打过）。只剩三机实机验收没跑——那需要另外两台真机器。**
 > 具体的完成边界见「进度」一节，不要按 README 的愿景当成已实现的能力。
+
+> **用着还行的话，点个 ⭐ 就够了。** 插件市场的「搜插件」按 GitHub star 排序
+> （`dsh-find-plugin` 的口径就是 `dsh-plugin` topic + 星数），star 是这个小插件唯一能被人
+> 翻到的机会。
+
+安全模型——信任边界、房间码为什么只是碰头把手、哪些已知限制是设计取舍、怎么报告漏洞：
+[SECURITY.md](SECURITY.md)。
 
 ## 界面
 
