@@ -41,9 +41,26 @@ npm i dsh-doudizhu-lan
 
 | 通道 | 坐标 | 校验 |
 | --- | --- | --- |
-| GitHub Release | `v0.2.3` | sha256 三处一致（见发布脚本输出） |
-| npm | `dsh-doudizhu-lan@0.2.3` | 装回来验过包名、patch 引用名与三个导出 |
-| 市场 | 条目 tarball 指到 v0.2.3 | PR 就地更新 |
+| GitHub Release | `v0.2.3` | asset 86400 字节，sha256 `cc79a9527911b9ad0da0dc0024eb7a38aaec8b5ec0a84705f80ac48ac59a8608`，本地/asset/下载回来三处一致 |
+| npm | `dsh-doudizhu-lan@0.2.3`（`latest`） | shasum `cb871f5ad0ca8ee872f043111c6625bb30fa6c15`；装回来验过：目录 `node_modules/dsh-doudizhu-lan`、patch 引用名同名、`lib/index.js` 的 `name="dsh-doudizhu"` 与 `inject=["webServer"]`、`watchRoom` 在包里 |
+| 市场 | 条目 tarball 指到 v0.2.3 | PR [#9786](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/9786)（#8397 已合并，线上是 v0.2.2） |
+| 旧名 | `@dingchenhui/dsh-doudizhu@0.2.1/0.2.2` 已 deprecated | 三个版本的 `deprecated` 字段都带「Renamed to dsh-doudizhu-lan」 |
+
+### 验收结果：一半做到，一半做不到（照实记）
+
+发布后重新测同一组查询（`registry.npmjs.org/-/v1/search`）：
+
+| 查询 | 结果 |
+| --- | --- |
+| `doudizhu` | ✅ 第 19 条（共 20 条）——改名前完全不在结果里 |
+| `dsh-doudizhu`（精确名） | ❌ 仍然只有占位包。**这条是结构性的**：占位包的包名正好等于这个字符串，精确同名永远排第一；我们的名字是 `dsh-doudizhu-lan`，token 化后不是一个词，除非拿到那个名字否则不会变 |
+| `斗地主` | ❌ 不在（79966 条，按下载量排，我们 0 下载） |
+| `dsh-plugin doudizhu` | ❌ 不在 |
+
+所以「被 npm 搜索发现」只解决了一半：自然词 `doudizhu` 能找到我们，精确名找不到。
+真正稳的发现路径是市场条目（已上线）与 GitHub 仓库；npm 名的作用是把
+`npm i` 这条安装路走通、并让搜到的人认得出来。要不要再追一步（比如靠下载量自然提升
+排名），等有真实安装量再看数据，不做没有依据的承诺。
 
 ## [0.2.2] - 2026-10-21
 
