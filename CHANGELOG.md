@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-10-27
+
+### 文档进包：`SECURITY.md` 随 npm 包一起发
+
+0.2.3 只把 `SECURITY.md` 放进了仓库，`files` 列表里没有它，所以从 npm 装的人看不到这份安全模型。
+这一版只补这一件事：`files` 加上 `SECURITY.md`，版本号前进一位，**运行逻辑与 0.2.3 完全相同**
+（`lib/` 不变，179 个单测照旧全绿）。
+
+- npm：`dsh-doudizhu-lan@0.2.4`
+- GitHub Release：`v0.2.4`
+- 市场条目：tarball 跟到 `v0.2.4`
+
 ### 文档与工程
 
 - **`SECURITY.md`**：照 `dsh-rewind` 的规格写的安全模型——信任边界（局域网端口 / 本机回环路由）、
